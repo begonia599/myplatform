@@ -31,11 +31,11 @@ func RegisterRoutes(router *gin.Engine, authService *auth.AuthService, permServi
 		admin.PUT("/defaults/:role", h.HandleSetDefaultPolicies)
 	}
 
-	// --- Authenticated: Permission Registry (any authenticated user/service) ---
-	g.POST("/registry", h.HandleRegisterPermissions)
+	// --- Authenticated: Permission Registry read (any authenticated user) ---
 	g.GET("/registry", h.HandleListModules)
 	g.GET("/registry/:module", h.HandleListModulePermissions)
 
-	// --- Service-to-service: Permission Check (no auth, used by business modules) ---
+	// --- Service-to-service: no auth required (used by business modules at startup) ---
+	router.POST("/api/permissions/registry", h.HandleRegisterPermissions)
 	router.POST("/api/permissions/check", h.HandleCheckPermission)
 }
