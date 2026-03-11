@@ -78,6 +78,23 @@ func (p *PermissionService) RegisterPermissions(module string, resources []Resou
 	}, nil, false)
 }
 
+// CheckPermission checks if a user has a specific permission.
+// This is a service-to-service call (no auth required).
+func (p *PermissionService) CheckPermission(userID uint, object, action string) (bool, error) {
+	var resp struct {
+		Allowed bool `json:"allowed"`
+	}
+	err := p.c.doJSON(http.MethodPost, "/api/permissions/check", map[string]any{
+		"user_id": userID,
+		"object":  object,
+		"action":  action,
+	}, &resp, false)
+	if err != nil {
+		return false, err
+	}
+	return resp.Allowed, nil
+}
+
 // ListModules returns all registered module names.
 func (p *PermissionService) ListModules() ([]string, error) {
 	var resp ModulesResponse

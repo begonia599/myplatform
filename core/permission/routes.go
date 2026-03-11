@@ -35,4 +35,7 @@ func RegisterRoutes(router *gin.Engine, authService *auth.AuthService, permServi
 	g.POST("/registry", h.HandleRegisterPermissions)
 	g.GET("/registry", h.HandleListModules)
 	g.GET("/registry/:module", h.HandleListModulePermissions)
+
+	// --- Service-to-service: Permission Check (no auth, used by business modules) ---
+	router.POST("/api/permissions/check", h.HandleCheckPermission)
 }

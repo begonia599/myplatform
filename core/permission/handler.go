@@ -256,3 +256,30 @@ func (h *Handler) HandleSetDefaultPolicies(c *gin.Context) {
 		"role":    role,
 	})
 }
+
+// ==================== Permission Check ====================
+
+// CheckPermissionRequest is the request body for checking a user's permission.
+type CheckPermissionRequest struct {
+	UserID uint   `json:"user_id" binding:"required"`
+	Object string `json:"object" binding:"required"`
+	Action string `json:"action" binding:"required"`
+}
+
+// HandleCheckPermission checks if a user has a specific permission.
+// This is used by business modules for service-to-service permission verification.
+func (h *Handler) HandleCheckPermission(c *gin.Context) {
+	var req CheckPermissionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	allowed, err := h.service.CheckPermission(req.UserID, req.Object, req.Action)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "permission check failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"allowed": allowed})
+}
