@@ -1,0 +1,26 @@
+server:
+  port: 8080
+  mode: debug
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: "postgres"
+  dbname: myplatform
+  sslmode: disable
+
+auth:
+  jwt_secret: "change-me-in-production"
+  access_token_expiry: 15m
+  refresh_token_expiry: 168h
+  allow_registration: true
+
+permission:
+  seed_defaults: true
+
+storage:
+  type: local
+  max_file_size: 52428800
+  local:
+    base_path: "./uploads"

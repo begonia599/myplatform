@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod:*)",
+      "Bash(go build:*)",
+      "Bash(go get:*)",
+      "Bash(docker compose:*)",
+      "Bash(timeout 5 go run:*)",
+      "Bash(go list:*)",
+      "Bash(curl:*)",
+      "Bash(go vet:*)",
+      "Bash(wc:*)"
+    ]
+  }
+}

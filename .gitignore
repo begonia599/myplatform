@@ -1,0 +1,28 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build cache
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Config with secrets (users should copy config.example.yaml)
+# config.yaml
+
+# Docker volumes
+pgdata/
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Casbin policy file  
+policy.csv

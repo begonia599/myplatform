@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyPlatform Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- Login page -->
+        <div id="page-login" class="page active">
+            <div class="login-container">
+                <div class="login-card">
+                    <div class="login-header">
+                        <div class="logo">⚡</div>
+                        <h1>MyPlatform</h1>
+                        <p>管理控制台</p>
+                    </div>
+                    <form id="login-form">
+                        <div class="form-group">
+                            <label for="login-username">用户名</label>
+                            <input type="text" id="login-username" placeholder="输入用户名" required autofocus>
+                        </div>
+                        <div class="form-group">
+                            <label for="login-password">密码</label>
+                            <input type="password" id="login-password" placeholder="输入密码" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-full">登录</button>
+                    </form>
+                    <!-- OTP flow for root -->
+                    <div id="otp-section" class="hidden">
+                        <div class="otp-notice">
+                            <span class="otp-icon">🔐</span>
+                            <p>登录码已打印到服务器控制台，请查看后输入</p>
+                        </div>
+                        <form id="otp-form">
+                            <div class="form-group">
+                                <label for="otp-code">登录码 (6位)</label>
+                                <input type="text" id="otp-code" placeholder="输入6位登录码" maxlength="6" pattern="[0-9]{6}"
+                                    required>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-full">验证</button>
+                        </form>
+                    </div>
+                    <div id="login-error" class="error-msg hidden"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard layout -->
+        <div id="dashboard" class="hidden">
+            <nav class="sidebar">
+                <div class="sidebar-header">
+                    <span class="logo-sm">⚡</span>
+                    <span class="sidebar-title">MyPlatform</span>
+                </div>
+                <ul class="nav-menu">
+                    <li><a href="#users" class="nav-link active" data-page="users">
+                            <span class="nav-icon">👥</span>用户管理
+                        </a></li>
+                    <li><a href="#roles" class="nav-link" data-page="roles">
+                            <span class="nav-icon">🛡️</span>角色权限
+                        </a></li>
+                    <li><a href="#defaults" class="nav-link" data-page="defaults">
+                            <span class="nav-icon">📋</span>默认模板
+                        </a></li>
+                    <li><a href="#registry" class="nav-link" data-page="registry">
+                            <span class="nav-icon">📦</span>权限注册表
+                        </a></li>
+                    <li><a href="#settings" class="nav-link" data-page="settings">
+                            <span class="nav-icon">⚙️</span>Root 设置
+                        </a></li>
+                </ul>
+                <div class="sidebar-footer">
+                    <div class="user-info">
+                        <span id="current-user">—</span>
+                    </div>
+                    <button id="logout-btn" class="btn btn-ghost btn-sm">退出登录</button>
+                </div>
+            </nav>
+
+            <main class="content">
+                <!-- Users page -->
+                <section id="page-users" class="page-content active">
+                    <div class="page-header">
+                        <h2>用户管理</h2>
+                    </div>
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>用户名</th>
+                                    <th>角色</th>
+                                    <th>状态</th>
+                                    <th>Root</th>
+                                    <th>注册时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Roles page -->
+                <section id="page-roles" class="page-content">
+                    <div class="page-header">
+                        <h2>角色权限管理</h2>
+                        <button id="add-policy-btn" class="btn btn-primary btn-sm">添加策略</button>
+                    </div>
+                    <div id="add-policy-form" class="card hidden" style="margin-bottom:1rem">
+                        <h3>新增策略</h3>
+                        <div class="form-row">
+                            <div class="form-group"><label>角色</label><input type="text" id="policy-role"
+                                    placeholder="admin"></div>
+                            <div class="form-group"><label>资源</label><input type="text" id="policy-object"
+                                    placeholder="blog.comment"></div>
+                            <div class="form-group"><label>操作</label><input type="text" id="policy-action"
+                                    placeholder="create"></div>
+                            <button id="submit-policy" class="btn btn-primary btn-sm"
+                                style="align-self:flex-end">提交</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>角色</th>
+                                    <th>资源</th>
+                                    <th>操作</th>
+                                    <th>删除</th>
+                                </tr>
+                            </thead>
+                            <tbody id="policies-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Defaults page -->
+                <section id="page-defaults" class="page-content">
+                    <div class="page-header">
+                        <h2>默认权限模板</h2>
+                    </div>
+                    <div class="card">
+                        <div class="form-row" style="margin-bottom:1rem">
+                            <div class="form-group">
+                                <label>选择角色</label>
+                                <select id="defaults-role-select">
+                                    <option value="user">user</option>
+                                    <option value="editor">editor</option>
+                                    <option value="admin">admin</option>
+                                </select>
+                            </div>
+                            <button id="load-defaults-btn" class="btn btn-primary btn-sm"
+                                style="align-self:flex-end">加载</button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>角色</th>
+                                    <th>资源</th>
+                                    <th>操作</th>
+                                    <th>删除</th>
+                                </tr>
+                            </thead>
+                            <tbody id="defaults-tbody"></tbody>
+                        </table>
+                        <h3 style="margin-top:1.5rem">添加默认策略</h3>
+                        <div class="form-row">
+                            <div class="form-group"><label>资源</label><input type="text" id="default-object"
+                                    placeholder="blog.comment"></div>
+                            <div class="form-group"><label>操作</label><input type="text" id="default-action"
+                                    placeholder="read"></div>
+                            <button id="add-default-btn" class="btn btn-primary btn-sm"
+                                style="align-self:flex-end">添加</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Registry page -->
+                <section id="page-registry" class="page-content">
+                    <div class="page-header">
+                        <h2>权限注册表</h2>
+                        <span class="badge">只读</span>
+                    </div>
+                    <div id="registry-modules"></div>
+                </section>
+
+                <!-- Settings page (root only) -->
+                <section id="page-settings" class="page-content">
+                    <div class="page-header">
+                        <h2>Root 设置</h2>
+                    </div>
+                    <div class="card" style="margin-bottom:1rem">
+                        <h3>设置 Root 密码</h3>
+                        <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:1rem">设置密码后，Root
+                            用户可以直接使用密码登录，无需每次查看 OTP。</p>
+                        <div class="form-row">
+                            <div class="form-group"><label>新用户名 (可选)</label><input type="text" id="settings-username"
+                                    placeholder="保持不变"></div>
+                            <div class="form-group"><label>新密码</label><input type="password" id="settings-password"
+                                    placeholder="输入新密码"></div>
+                            <button id="save-creds-btn" class="btn btn-primary btn-sm"
+                                style="align-self:flex-end">保存</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>绑定到现有用户</h3>
+                        <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:1rem">将 Root
+                            权限转移给一个现有用户。绑定后该用户可以用自己的密码登录管理后台。</p>
+                        <div id="bind-user-list"></div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+    <div id="toast" class="toast hidden"></div>
+    <script src="app.js"></script>
+</body>
+
+</html>
