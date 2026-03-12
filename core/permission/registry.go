@@ -28,6 +28,7 @@ type ResourceDef struct {
 
 // RegisterPermissions idempotently registers permission definitions for a module.
 // Existing entries are not duplicated; new ones are inserted.
+// Automatically creates Casbin policies for admin and user roles.
 func (s *PermissionService) RegisterPermissions(db *gorm.DB, module string, defs []ResourceDef) (int, error) {
 	created := 0
 	for _, def := range defs {
@@ -47,6 +48,10 @@ func (s *PermissionService) RegisterPermissions(db *gorm.DB, module string, defs
 			if result.RowsAffected > 0 {
 				created++
 			}
+
+			// Auto-seed Casbin policies: admin and user get all permissions by default
+			s.enforcer.AddPolicy("admin", def.Resource, action)
+			s.enforcer.AddPolicy("user", def.Resource, action)
 		}
 	}
 	return created, nil

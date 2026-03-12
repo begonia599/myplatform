@@ -275,10 +275,32 @@ func (h *Handler) HandleCheckPermission(c *gin.Context) {
 		return
 	}
 
+	// Look up user to get role
+	var user struct {
+		Role   string
+		IsRoot bool
+	}
+	if err := h.db.Table("users").Select("role, is_root").Where("id = ?", req.UserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	// Admin and root bypass all permission checks
+	if user.IsRoot || user.Role == "admin" {
+		c.JSON(http.StatusOK, gin.H{"allowed": true})
+		return
+	}
+
+	// Check user-specific policy
 	allowed, err := h.service.CheckPermission(req.UserID, req.Object, req.Action)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "permission check failed"})
 		return
+	}
+
+	// Also check role-based policy if user-specific not found
+	if !allowed {
+		allowed, _ = h.service.enforcer.Enforce(user.Role, req.Object, req.Action)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"allowed": allowed})
