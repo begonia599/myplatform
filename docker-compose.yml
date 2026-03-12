@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: myplatform
-    ports:
-      # - "15432:5432"  # uncomment for external DB access
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
