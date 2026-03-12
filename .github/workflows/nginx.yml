@@ -1,0 +1,29 @@
+name: Deploy Nginx Config
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nginx/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy nginx configs
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            cd /opt/myplatform
+            git pull origin main
+            cp nginx/* /etc/nginx/sites-available/
+            for f in nginx/*; do
+              name=$(basename "$f")
+              ln -sf /etc/nginx/sites-available/$name /etc/nginx/sites-enabled/$name
+            done
+            nginx -t && systemctl reload nginx
+            echo "Nginx config deployed: $(date)"
