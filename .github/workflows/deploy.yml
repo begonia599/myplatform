@@ -3,6 +3,10 @@ name: Deploy MyPlatform
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'nginx/**'
+      - '.github/workflows/nginx.yml'
+      - '*.md'
 
 jobs:
   deploy:
