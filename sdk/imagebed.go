@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ImageBedService wraps all /api/imagebed endpoints.
@@ -34,9 +37,22 @@ func (s *ImageBedService) UploadReader(filename string, reader io.Reader) (*Imag
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile("image", filename)
+
+	// Detect MIME type from file extension instead of using CreateFormFile
+	// which defaults to application/octet-stream
+	mimeType := mime.TypeByExtension(filepath.Ext(filename))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`,
+		strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(filename)))
+	h.Set("Content-Type", mimeType)
+
+	part, err := writer.CreatePart(h)
 	if err != nil {
-		return nil, fmt.Errorf("sdk: create form file: %w", err)
+		return nil, fmt.Errorf("sdk: create form part: %w", err)
 	}
 	if _, err := io.Copy(part, reader); err != nil {
 		return nil, fmt.Errorf("sdk: copy file data: %w", err)

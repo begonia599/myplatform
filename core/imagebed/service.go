@@ -3,6 +3,7 @@ package imagebed
 import (
 	"context"
 	"fmt"
+	"mime"
 	"mime/multipart"
 	"path/filepath"
 	"strings"
@@ -48,8 +49,13 @@ func (s *ImageBedService) Upload(ctx context.Context, fh *multipart.FileHeader, 
 		return nil, fmt.Errorf("file size %d exceeds limit %d", fh.Size, s.cfg.MaxFileSize)
 	}
 
-	// Validate MIME type
+	// Detect MIME type: prefer header, fallback to file extension
 	mimeType := fh.Header.Get("Content-Type")
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = mime.TypeByExtension(filepath.Ext(fh.Filename))
+	}
+
+	// Validate MIME type
 	if !allowedImageTypes[mimeType] {
 		return nil, fmt.Errorf("unsupported image type: %s", mimeType)
 	}
