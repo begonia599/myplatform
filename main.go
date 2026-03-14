@@ -8,6 +8,7 @@ import (
 	"github.com/begonia599/myplatform/core/auth"
 	"github.com/begonia599/myplatform/core/config"
 	"github.com/begonia599/myplatform/core/database"
+	"github.com/begonia599/myplatform/core/imagebed"
 	"github.com/begonia599/myplatform/core/permission"
 	"github.com/begonia599/myplatform/core/server"
 	"github.com/begonia599/myplatform/core/storage"
@@ -28,7 +29,7 @@ func main() {
 	defer database.Close(db)
 
 	if err := database.AutoMigrate(db, &auth.User{}, &auth.RefreshToken{}, &auth.UserProfile{}, &storage.File{},
-		&permission.PermissionDefinition{}, &permission.DefaultRolePolicy{}); err != nil {
+		&permission.PermissionDefinition{}, &permission.DefaultRolePolicy{}, &imagebed.Image{}); err != nil {
 		fmt.Fprintf(os.Stderr, "Auto-migrate failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -63,10 +64,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	imagebedService, err := imagebed.New(&cfg.ImageBed, &cfg.Storage, db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ImageBed init failed: %v\n", err)
+		os.Exit(1)
+	}
+
 	srv := server.New(&cfg.Server, db)
 	auth.RegisterRoutes(srv.Router(), authService, rootService, permService, db)
 	permission.RegisterRoutes(srv.Router(), authService, permService, db)
 	storage.RegisterRoutes(srv.Router(), authService, storageService, permService)
+	imagebed.RegisterRoutes(srv.Router(), authService, imagebedService, permService)
 	log.Printf("Starting server on :%d\n", cfg.Server.Port)
 	if err := srv.Run(); err != nil {
 		log.Fatalf("Server failed: %v\n", err)

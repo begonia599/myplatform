@@ -24,3 +24,7 @@ storage:
   max_file_size: 52428800
   local:
     base_path: "./uploads"
+
+imagebed:
+  max_file_size: 10485760
+  base_path: "imagebed"

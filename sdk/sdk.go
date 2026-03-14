@@ -29,6 +29,7 @@ type Client struct {
 	Auth       *AuthService
 	Storage    *StorageService
 	Permission *PermissionService
+	ImageBed   *ImageBedService
 }
 
 // New creates a new SDK client.
@@ -45,6 +46,7 @@ func New(cfg *Config) *Client {
 	c.Auth = &AuthService{c: c}
 	c.Storage = &StorageService{c: c}
 	c.Permission = &PermissionService{c: c}
+	c.ImageBed = &ImageBedService{c: c}
 	return c
 }
 
@@ -61,6 +63,7 @@ func (c *Client) WithToken(accessToken string) *Client {
 	scoped.Auth = &AuthService{c: scoped}
 	scoped.Storage = &StorageService{c: scoped}
 	scoped.Permission = &PermissionService{c: scoped}
+	scoped.ImageBed = &ImageBedService{c: scoped}
 	return scoped
 }
 

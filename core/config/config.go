@@ -5,17 +5,19 @@ import (
 
 	"github.com/begonia599/myplatform/core/auth"
 	"github.com/begonia599/myplatform/core/database"
+	"github.com/begonia599/myplatform/core/imagebed"
 	"github.com/begonia599/myplatform/core/permission"
 	"github.com/begonia599/myplatform/core/storage"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Server   ServerConfig            `yaml:"server"`
-	Database database.DatabaseConfig `yaml:"database"`
+	Server     ServerConfig                `yaml:"server"`
+	Database   database.DatabaseConfig     `yaml:"database"`
 	Auth       auth.AuthConfig             `yaml:"auth"`
 	Permission permission.PermissionConfig `yaml:"permission"`
-	Storage    storage.StorageConfig          `yaml:"storage"`
+	Storage    storage.StorageConfig       `yaml:"storage"`
+	ImageBed   imagebed.ImageBedConfig     `yaml:"imagebed"`
 }
 
 type ServerConfig struct {
@@ -54,6 +56,9 @@ func Load(path string) (*Config, error) {
 
 	// Storage defaults
 	cfg.Storage.ApplyDefaults()
+
+	// ImageBed defaults
+	cfg.ImageBed.ApplyDefaults()
 
 	return &cfg, nil
 }

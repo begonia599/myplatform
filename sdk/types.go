@@ -133,3 +133,25 @@ type DefaultPoliciesResponse struct {
 	Policies []DefaultPolicy `json:"policies"`
 }
 
+// ---------- ImageBed ----------
+
+type Image struct {
+	ID           uint      `json:"id"`
+	Filename     string    `json:"filename"`
+	OriginalName string    `json:"original_name"`
+	Size         int64     `json:"size"`
+	MimeType     string    `json:"mime_type"`
+	StoragePath  string    `json:"storage_path"`
+	UploaderID   uint      `json:"uploader_id"`
+	IsPublic     bool      `json:"is_public"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type ImageListResponse struct {
+	Data     []Image `json:"data"`
+	Total    int64   `json:"total"`
+	Page     int     `json:"page"`
+	PageSize int     `json:"page_size"`
+}
+
