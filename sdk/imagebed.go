@@ -39,10 +39,22 @@ func (s *ImageBedService) UploadReader(filename string, reader io.Reader) (*Imag
 	writer := multipart.NewWriter(&buf)
 
 	// Detect MIME type from file extension instead of using CreateFormFile
-	// which defaults to application/octet-stream
-	mimeType := mime.TypeByExtension(filepath.Ext(filename))
+	// which defaults to application/octet-stream.
+	// Hardcoded fallback needed because Alpine Linux lacks /etc/mime.types.
+	ext := strings.ToLower(filepath.Ext(filename))
+	mimeType := mime.TypeByExtension(ext)
 	if mimeType == "" {
-		mimeType = "application/octet-stream"
+		extMimes := map[string]string{
+			".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+			".png": "image/png", ".gif": "image/gif",
+			".webp": "image/webp", ".svg": "image/svg+xml",
+			".bmp": "image/bmp", ".ico": "image/x-icon",
+		}
+		if m, ok := extMimes[ext]; ok {
+			mimeType = m
+		} else {
+			mimeType = "application/octet-stream"
+		}
 	}
 
 	h := make(textproto.MIMEHeader)

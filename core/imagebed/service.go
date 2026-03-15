@@ -42,6 +42,20 @@ func New(cfg *ImageBedConfig, storageCfg *storage.StorageConfig, db *gorm.DB) (*
 	return &ImageBedService{db: db, cfg: cfg, backend: backend, basePath: cfg.BasePath}, nil
 }
 
+// extToMime provides MIME types for common image extensions.
+// This is needed because Alpine Linux lacks /etc/mime.types,
+// causing Go's mime.TypeByExtension to return empty strings.
+var extToMime = map[string]string{
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".bmp":  "image/bmp",
+	".ico":  "image/x-icon",
+}
+
 // Upload saves an image to the backend and records its metadata.
 func (s *ImageBedService) Upload(ctx context.Context, fh *multipart.FileHeader, uploaderID uint) (*Image, error) {
 	// Validate size
@@ -49,10 +63,14 @@ func (s *ImageBedService) Upload(ctx context.Context, fh *multipart.FileHeader, 
 		return nil, fmt.Errorf("file size %d exceeds limit %d", fh.Size, s.cfg.MaxFileSize)
 	}
 
-	// Detect MIME type: prefer header, fallback to file extension
+	// Detect MIME type: header → stdlib → hardcoded map
 	mimeType := fh.Header.Get("Content-Type")
 	if mimeType == "" || mimeType == "application/octet-stream" {
-		mimeType = mime.TypeByExtension(filepath.Ext(fh.Filename))
+		ext := strings.ToLower(filepath.Ext(fh.Filename))
+		mimeType = mime.TypeByExtension(ext)
+		if mimeType == "" {
+			mimeType = extToMime[ext]
+		}
 	}
 
 	// Validate MIME type
