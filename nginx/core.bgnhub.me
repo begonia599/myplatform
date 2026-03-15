@@ -20,6 +20,8 @@ server {
     add_header Alt-Svc 'h3=":443"; ma=86400' always;
     add_header Strict-Transport-Security "max-age=63072000" always;
 
+    client_max_body_size 10m;
+
     location / {
         proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
