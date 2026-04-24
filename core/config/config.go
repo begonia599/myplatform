@@ -81,6 +81,15 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MYPLATFORM_AUTH_OAUTH_GITHUB_REDIRECT_URL"); v != "" {
 		cfg.Auth.OAuth.GitHub.RedirectURL = v
 	}
+	if v := os.Getenv("MYPLATFORM_AUTH_OAUTH_DISCORD_CLIENT_ID"); v != "" {
+		cfg.Auth.OAuth.Discord.ClientID = v
+	}
+	if v := os.Getenv("MYPLATFORM_AUTH_OAUTH_DISCORD_CLIENT_SECRET"); v != "" {
+		cfg.Auth.OAuth.Discord.ClientSecret = v
+	}
+	if v := os.Getenv("MYPLATFORM_AUTH_OAUTH_DISCORD_REDIRECT_URL"); v != "" {
+		cfg.Auth.OAuth.Discord.RedirectURL = v
+	}
 	if v := os.Getenv("MYPLATFORM_DB_HOST"); v != "" {
 		cfg.Database.Host = v
 	}

@@ -20,6 +20,10 @@ auth:
       client_id: ""
       client_secret: ""
       redirect_url: "http://localhost:8080/auth/oauth/github/callback"
+    discord:
+      client_id: ""
+      client_secret: ""
+      redirect_url: "http://localhost:8080/auth/oauth/discord/callback"
 
 permission:
   seed_defaults: true

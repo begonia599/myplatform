@@ -45,9 +45,14 @@ func main() {
 
 	// Initialize OAuth service
 	var oauthService *auth.OAuthService
-	if cfg.Auth.OAuth.GitHub.ClientID != "" {
+	if cfg.Auth.OAuth.GitHub.ClientID != "" || cfg.Auth.OAuth.Discord.ClientID != "" {
 		oauthService = auth.NewOAuthService(&cfg.Auth, db)
-		log.Println("GitHub OAuth enabled")
+		if cfg.Auth.OAuth.GitHub.ClientID != "" {
+			log.Println("GitHub OAuth enabled")
+		}
+		if cfg.Auth.OAuth.Discord.ClientID != "" {
+			log.Println("Discord OAuth enabled")
+		}
 	}
 
 	permService, err := permission.New(&cfg.Permission, db)

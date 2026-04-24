@@ -11,7 +11,14 @@ type AuthConfig struct {
 }
 
 type OAuthConfig struct {
-	GitHub GitHubOAuthConfig `yaml:"github"`
+	GitHub  GitHubOAuthConfig  `yaml:"github"`
+	Discord DiscordOAuthConfig `yaml:"discord"`
+}
+
+type DiscordOAuthConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURL  string `yaml:"redirect_url"`
 }
 
 type GitHubOAuthConfig struct {

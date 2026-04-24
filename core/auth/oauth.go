@@ -60,7 +60,7 @@ func (s *OAuthService) githubConfig() *oauth2.Config {
 // redirectURI is the business frontend URL to redirect back to after auth.
 func (s *OAuthService) Authorize(provider, redirectURI string) (string, error) {
 	switch provider {
-	case "github":
+	case "github", "discord":
 		state, err := randomHex(16)
 		if err != nil {
 			return "", fmt.Errorf("auth: generate state: %w", err)
@@ -69,7 +69,14 @@ func (s *OAuthService) Authorize(provider, redirectURI string) (string, error) {
 			createdAt:   time.Now(),
 			redirectURI: redirectURI,
 		})
-		return s.githubConfig().AuthCodeURL(state), nil
+		var cfg *oauth2.Config
+		switch provider {
+		case "github":
+			cfg = s.githubConfig()
+		case "discord":
+			cfg = s.discordConfig()
+		}
+		return cfg.AuthCodeURL(state), nil
 	default:
 		return "", ErrUnsupportedProvider
 	}
@@ -89,6 +96,8 @@ func (s *OAuthService) Callback(authService *AuthService, permApply PermissionAp
 	switch provider {
 	case "github":
 		user, err = s.githubCallback(authService, permApply, code)
+	case "discord":
+		user, err = s.discordCallback(authService, permApply, code)
 	default:
 		return "", ErrUnsupportedProvider
 	}
@@ -254,6 +263,153 @@ func (s *OAuthService) fetchGitHubUser(ctx context.Context, accessToken string) 
 	var user githubUser
 	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
 		return nil, fmt.Errorf("auth: decode github user: %w", err)
+	}
+	return &user, nil
+}
+
+// --- Discord provider ---
+
+var discordEndpoint = oauth2.Endpoint{
+	AuthURL:  "https://discord.com/oauth2/authorize",
+	TokenURL: "https://discord.com/api/oauth2/token",
+}
+
+func (s *OAuthService) discordConfig() *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     s.cfg.OAuth.Discord.ClientID,
+		ClientSecret: s.cfg.OAuth.Discord.ClientSecret,
+		RedirectURL:  s.cfg.OAuth.Discord.RedirectURL,
+		Scopes:       []string{"identify"},
+		Endpoint:     discordEndpoint,
+	}
+}
+
+type discordUser struct {
+	ID            string  `json:"id"`
+	Username      string  `json:"username"`
+	GlobalName    *string `json:"global_name"`
+	Avatar        *string `json:"avatar"`
+	Email         string  `json:"email"`
+}
+
+func (s *OAuthService) discordCallback(authService *AuthService, permApply PermissionApplier, code string) (*User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	token, err := s.discordConfig().Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrOAuthFailed, err)
+	}
+
+	dcUser, err := s.fetchDiscordUser(ctx, token.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var avatarURL string
+	if dcUser.Avatar != nil {
+		avatarURL = fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", dcUser.ID, *dcUser.Avatar)
+	}
+
+	var oauthAccount OAuthAccount
+	err = s.db.Where("provider = ? AND provider_user_id = ?", "discord", dcUser.ID).First(&oauthAccount).Error
+	if err == nil {
+		s.db.Model(&oauthAccount).Updates(map[string]any{
+			"avatar_url": avatarURL,
+		})
+		var user User
+		if err := s.db.First(&user, oauthAccount.UserID).Error; err != nil {
+			return nil, fmt.Errorf("auth: oauth user not found: %w", err)
+		}
+		return &user, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("auth: query oauth account: %w", err)
+	}
+
+	var user User
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		username := dcUser.Username
+		for i := 0; ; i++ {
+			candidate := username
+			if i > 0 {
+				candidate = fmt.Sprintf("%s_%d", username, i)
+			}
+			var count int64
+			tx.Model(&User{}).Where("username = ?", candidate).Count(&count)
+			if count == 0 {
+				username = candidate
+				break
+			}
+		}
+
+		user = User{
+			Username:     username,
+			PasswordHash: "",
+			Role:         "user",
+		}
+		if err := tx.Create(&user).Error; err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+
+		nickname := dcUser.Username
+		if dcUser.GlobalName != nil && *dcUser.GlobalName != "" {
+			nickname = *dcUser.GlobalName
+		}
+		profile := UserProfile{
+			UserID:    user.ID,
+			Nickname:  nickname,
+			AvatarURL: avatarURL,
+		}
+		if err := tx.Create(&profile).Error; err != nil {
+			return fmt.Errorf("create profile: %w", err)
+		}
+
+		oauthAccount = OAuthAccount{
+			UserID:         user.ID,
+			Provider:       "discord",
+			ProviderUserID: dcUser.ID,
+			AvatarURL:      avatarURL,
+		}
+		if err := tx.Create(&oauthAccount).Error; err != nil {
+			return fmt.Errorf("create oauth account: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("auth: oauth create user: %w", err)
+	}
+
+	if permApply != nil {
+		if err := permApply.ApplyDefaultPolicies(s.db, user.ID, user.Role); err != nil {
+			fmt.Printf("Warning: failed to apply default permissions for oauth user %d: %v\n", user.ID, err)
+		}
+	}
+
+	return &user, nil
+}
+
+func (s *OAuthService) fetchDiscordUser(ctx context.Context, accessToken string) (*discordUser, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/users/@me", nil)
+	if err != nil {
+		return nil, fmt.Errorf("auth: create discord request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("auth: discord api request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("auth: discord api returned %d", resp.StatusCode)
+	}
+
+	var user discordUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("auth: decode discord user: %w", err)
 	}
 	return &user, nil
 }
