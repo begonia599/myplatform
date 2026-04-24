@@ -5,8 +5,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func RegisterRoutes(router *gin.Engine, service *AuthService, rootService *RootService, permApply PermissionApplier, db *gorm.DB) {
-	h := NewHandler(service, rootService, permApply, db)
+func RegisterRoutes(router *gin.Engine, service *AuthService, rootService *RootService, oauthService *OAuthService, permApply PermissionApplier, db *gorm.DB) {
+	h := NewHandler(service, rootService, oauthService, permApply, db)
 	g := router.Group("/auth")
 	g.POST("/register", h.HandleRegister)
 	g.POST("/login", h.HandleLogin)
@@ -16,6 +16,16 @@ func RegisterRoutes(router *gin.Engine, service *AuthService, rootService *RootS
 	g.GET("/me", AuthMiddleware(service), h.HandleMe)
 	g.GET("/profile", AuthMiddleware(service), h.HandleGetProfile)
 	g.PUT("/profile", AuthMiddleware(service), h.HandleUpdateProfile)
+
+	// OAuth account management (static paths must be registered before wildcard)
+	g.PUT("/password", AuthMiddleware(service), h.HandleChangePassword)
+	g.GET("/oauth/accounts", AuthMiddleware(service), h.HandleGetOAuthAccounts)
+	g.DELETE("/oauth/accounts/:provider", AuthMiddleware(service), h.HandleUnlinkOAuth)
+
+	// OAuth login flow (wildcard :provider)
+	g.GET("/oauth/:provider", h.HandleOAuthAuthorize)
+	g.GET("/oauth/:provider/callback", h.HandleOAuthCallback)
+	g.POST("/oauth/exchange", h.HandleOAuthExchange)
 
 	// Root endpoints
 	g.POST("/root/otp", h.HandleRootOTP)

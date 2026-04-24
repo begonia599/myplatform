@@ -17,14 +17,15 @@ type PermissionApplier interface {
 }
 
 type Handler struct {
-	service     *AuthService
-	rootService *RootService
-	permApply   PermissionApplier
-	db          *gorm.DB
+	service      *AuthService
+	rootService  *RootService
+	oauthService *OAuthService
+	permApply    PermissionApplier
+	db           *gorm.DB
 }
 
-func NewHandler(service *AuthService, rootService *RootService, permApply PermissionApplier, db *gorm.DB) *Handler {
-	return &Handler{service: service, rootService: rootService, permApply: permApply, db: db}
+func NewHandler(service *AuthService, rootService *RootService, oauthService *OAuthService, permApply PermissionApplier, db *gorm.DB) *Handler {
+	return &Handler{service: service, rootService: rootService, oauthService: oauthService, permApply: permApply, db: db}
 }
 
 type RegisterRequest struct {
@@ -304,6 +305,105 @@ func (h *Handler) HandleUpdateProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, profile)
+}
+
+// ==================== Password & OAuth Account Management ====================
+
+// HandleChangePassword handles password change or initial password setup.
+func (h *Handler) HandleChangePassword(c *gin.Context) {
+	cu, err := MustCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new_password is required"})
+		return
+	}
+
+	if len(req.NewPassword) < 6 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 6 characters"})
+		return
+	}
+
+	hasPassword, err := h.service.HasPassword(cu.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+
+	if hasPassword {
+		// Change existing password
+		if req.OldPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "old_password is required"})
+			return
+		}
+		if err := h.service.ChangePassword(cu.ID, req.OldPassword, req.NewPassword); err != nil {
+			if errors.Is(err, ErrInvalidCredentials) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "incorrect old password"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to change password"})
+			return
+		}
+	} else {
+		// Set initial password (OAuth user)
+		if err := h.service.SetPassword(cu.ID, req.NewPassword); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to set password"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "password updated"})
+}
+
+// HandleGetOAuthAccounts returns the current user's linked OAuth accounts.
+func (h *Handler) HandleGetOAuthAccounts(c *gin.Context) {
+	cu, err := MustCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return
+	}
+
+	accounts, err := h.service.GetOAuthAccounts(cu.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get oauth accounts"})
+		return
+	}
+
+	hasPassword, _ := h.service.HasPassword(cu.ID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"accounts":     accounts,
+		"has_password": hasPassword,
+	})
+}
+
+// HandleUnlinkOAuth removes an OAuth account link for the current user.
+func (h *Handler) HandleUnlinkOAuth(c *gin.Context) {
+	cu, err := MustCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return
+	}
+
+	provider := c.Param("provider")
+	if provider == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider is required"})
+		return
+	}
+
+	if err := h.service.UnlinkOAuth(cu.ID, provider); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "oauth account unlinked"})
 }
 
 // ==================== Root Endpoints ====================

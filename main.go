@@ -28,7 +28,7 @@ func main() {
 	}
 	defer database.Close(db)
 
-	if err := database.AutoMigrate(db, &auth.User{}, &auth.RefreshToken{}, &auth.UserProfile{}, &storage.File{},
+	if err := database.AutoMigrate(db, &auth.User{}, &auth.RefreshToken{}, &auth.UserProfile{}, &auth.OAuthAccount{}, &storage.File{},
 		&permission.PermissionDefinition{}, &permission.DefaultRolePolicy{}, &imagebed.Image{}); err != nil {
 		fmt.Fprintf(os.Stderr, "Auto-migrate failed: %v\n", err)
 		os.Exit(1)
@@ -42,6 +42,13 @@ func main() {
 
 	// Initialize root user service (creates root user on first run)
 	rootService := auth.NewRootService(db, &cfg.Auth)
+
+	// Initialize OAuth service
+	var oauthService *auth.OAuthService
+	if cfg.Auth.OAuth.GitHub.ClientID != "" {
+		oauthService = auth.NewOAuthService(&cfg.Auth, db)
+		log.Println("GitHub OAuth enabled")
+	}
 
 	permService, err := permission.New(&cfg.Permission, db)
 	if err != nil {
@@ -71,7 +78,7 @@ func main() {
 	}
 
 	srv := server.New(&cfg.Server, db)
-	auth.RegisterRoutes(srv.Router(), authService, rootService, permService, db)
+	auth.RegisterRoutes(srv.Router(), authService, rootService, oauthService, permService, db)
 	permission.RegisterRoutes(srv.Router(), authService, permService, db)
 	storage.RegisterRoutes(srv.Router(), authService, storageService, permService)
 	imagebed.RegisterRoutes(srv.Router(), authService, imagebedService, permService)

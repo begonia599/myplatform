@@ -177,6 +177,85 @@ func (s *AuthService) UpdateProfile(userID uint, updates map[string]any) (*UserP
 	return profile, nil
 }
 
+// HasPassword checks whether the user has a password set (OAuth-only users may not).
+func (s *AuthService) HasPassword(userID uint) (bool, error) {
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return false, err
+	}
+	return user.PasswordHash != "", nil
+}
+
+// ChangePassword verifies the old password and sets a new one.
+func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword string) error {
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return err
+	}
+	if user.PasswordHash != "" {
+		if !checkPassword(user.PasswordHash, oldPassword) {
+			return ErrInvalidCredentials
+		}
+	}
+	hash, err := hashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("auth: failed to hash password: %w", err)
+	}
+	return s.db.Model(user).Update("password_hash", hash).Error
+}
+
+// SetPassword sets a password for a user who doesn't have one (e.g. OAuth-only).
+func (s *AuthService) SetPassword(userID uint, newPassword string) error {
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return err
+	}
+	if user.PasswordHash != "" {
+		return errors.New("user already has a password, use ChangePassword instead")
+	}
+	hash, err := hashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("auth: failed to hash password: %w", err)
+	}
+	return s.db.Model(user).Update("password_hash", hash).Error
+}
+
+// GetOAuthAccounts returns all OAuth accounts linked to the given user.
+func (s *AuthService) GetOAuthAccounts(userID uint) ([]OAuthAccount, error) {
+	var accounts []OAuthAccount
+	if err := s.db.Where("user_id = ?", userID).Find(&accounts).Error; err != nil {
+		return nil, fmt.Errorf("auth: failed to query oauth accounts: %w", err)
+	}
+	return accounts, nil
+}
+
+// UnlinkOAuth removes an OAuth account link. Refuses if the user has no password
+// and this is their only login method.
+func (s *AuthService) UnlinkOAuth(userID uint, provider string) error {
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return err
+	}
+
+	// Count remaining OAuth accounts
+	var count int64
+	s.db.Model(&OAuthAccount{}).Where("user_id = ?", userID).Count(&count)
+
+	// If user has no password and only one OAuth account, refuse
+	if user.PasswordHash == "" && count <= 1 {
+		return errors.New("cannot unlink: this is your only login method, please set a password first")
+	}
+
+	result := s.db.Where("user_id = ? AND provider = ?", userID, provider).Delete(&OAuthAccount{})
+	if result.Error != nil {
+		return fmt.Errorf("auth: failed to unlink oauth: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("oauth account not found")
+	}
+	return nil
+}
+
 func (s *AuthService) ValidateAccessToken(tokenStr string) (*Claims, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {

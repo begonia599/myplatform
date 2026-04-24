@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -127,3 +128,52 @@ func (a *AuthService) UpdateProfile(update *ProfileUpdate) (*UserProfile, error)
 	}
 	return &resp, nil
 }
+
+// OAuthAuthorize returns the OAuth authorization URL for the given provider.
+// redirectURI is the business frontend URL to redirect back to after auth.
+func (a *AuthService) OAuthAuthorize(provider, redirectURI string) (*OAuthAuthorizeResponse, error) {
+	path := fmt.Sprintf("/auth/oauth/%s?redirect_uri=%s", provider, redirectURI)
+	var resp OAuthAuthorizeResponse
+	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// OAuthExchange exchanges a one-time exchange code for a token pair.
+func (a *AuthService) OAuthExchange(exchangeCode string) (*TokenPair, error) {
+	var tokens TokenPair
+	err := a.c.doJSON(http.MethodPost, "/auth/oauth/exchange", map[string]string{
+		"exchange_code": exchangeCode,
+	}, &tokens, false)
+	if err != nil {
+		return nil, err
+	}
+	a.c.SetTokens(tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresIn)
+	return &tokens, nil
+}
+
+// ChangePassword changes the user's password. For OAuth-only users (no existing password),
+// pass an empty oldPassword to set password for the first time.
+func (a *AuthService) ChangePassword(oldPassword, newPassword string) error {
+	body := map[string]string{"new_password": newPassword}
+	if oldPassword != "" {
+		body["old_password"] = oldPassword
+	}
+	return a.c.doJSON(http.MethodPut, "/auth/password", body, nil, true)
+}
+
+// GetOAuthAccounts returns all OAuth accounts linked to the current user.
+func (a *AuthService) GetOAuthAccounts() (*OAuthAccountsResponse, error) {
+	var resp OAuthAccountsResponse
+	if err := a.c.doJSON(http.MethodGet, "/auth/oauth/accounts", nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// UnlinkOAuth removes an OAuth account link for the given provider.
+func (a *AuthService) UnlinkOAuth(provider string) error {
+	return a.c.doJSON(http.MethodDelete, "/auth/oauth/accounts/"+provider, nil, nil, true)
+}
+

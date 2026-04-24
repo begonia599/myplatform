@@ -55,6 +55,27 @@ type RegisterResponse struct {
 	Role     string `json:"role"`
 }
 
+// ---------- OAuth ----------
+
+type OAuthAuthorizeResponse struct {
+	AuthURL string `json:"auth_url"`
+}
+
+type OAuthAccountInfo struct {
+	ID             uint   `json:"id"`
+	Provider       string `json:"provider"`
+	ProviderUserID string `json:"provider_user_id"`
+	Email          string `json:"email"`
+	AvatarURL      string `json:"avatar_url"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+type OAuthAccountsResponse struct {
+	Accounts    []OAuthAccountInfo `json:"accounts"`
+	HasPassword bool               `json:"has_password"`
+}
+
 // ---------- Storage ----------
 
 type File struct {

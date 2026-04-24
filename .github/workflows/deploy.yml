@@ -19,10 +19,25 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
+          envs: MYPLATFORM_AUTH_JWT_SECRET,MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID,MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET,MYPLATFORM_AUTH_OAUTH_GITHUB_REDIRECT_URL
           script: |
             cd /opt/myplatform || { git clone https://github.com/begonia599/myplatform.git /opt/myplatform && cd /opt/myplatform; }
             git pull origin main
+
+            # Write secrets to .env (docker compose reads automatically)
+            cat > /opt/myplatform/.env << 'ENVEOF'
+            MYPLATFORM_AUTH_JWT_SECRET=$MYPLATFORM_AUTH_JWT_SECRET
+            MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID=$MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID
+            MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET=$MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET
+            MYPLATFORM_AUTH_OAUTH_GITHUB_REDIRECT_URL=$MYPLATFORM_AUTH_OAUTH_GITHUB_REDIRECT_URL
+            ENVEOF
+
             docker compose down
             docker compose up --build -d
             docker image prune -f
             echo "Deploy complete: $(date)"
+        env:
+          MYPLATFORM_AUTH_JWT_SECRET: ${{ secrets.MYPLATFORM_AUTH_JWT_SECRET }}
+          MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID: ${{ secrets.MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID }}
+          MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET: ${{ secrets.MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET }}
+          MYPLATFORM_AUTH_OAUTH_GITHUB_REDIRECT_URL: ${{ secrets.MYPLATFORM_AUTH_OAUTH_GITHUB_REDIRECT_URL }}

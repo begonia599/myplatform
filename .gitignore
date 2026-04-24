@@ -24,5 +24,8 @@ uploads/
 .DS_Store
 Thumbs.db
 
-# Casbin policy file  
+# Casbin policy file
 policy.csv
+
+# Environment secrets
+.env
