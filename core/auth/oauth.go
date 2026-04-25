@@ -121,7 +121,7 @@ func (s *OAuthService) Callback(authService *AuthService, permApply PermissionAp
 	st := val.(oauthState)
 
 	if st.mode == oauthModeBind {
-		return s.bindCallback(provider, code, st), nil
+		return s.bindCallback(provider, code, st, permApply), nil
 	}
 
 	// Default: login mode.
@@ -162,7 +162,7 @@ func (s *OAuthService) Callback(authService *AuthService, permApply PermissionAp
 //   - "conflict"          — bound to a different user
 //   - "oauth_failed"      — provider exchange/userinfo error
 //   - "internal_error"    — DB error
-func (s *OAuthService) bindCallback(provider, code string, st oauthState) string {
+func (s *OAuthService) bindCallback(provider, code string, st oauthState, permApply PermissionApplier) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -205,7 +205,39 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState) string
 		if existing.UserID == st.bindUserID {
 			return appendQuery(st.redirectURI, "bind_result", "already_bound")
 		}
-		return appendQuery(st.redirectURI, "bind_result", "conflict")
+		// The provider account is currently held by another user. If that
+		// user is just an OAuth-only stub (no password set, not root, not
+		// already merged), absorb them into the current user — this turns
+		// a "conflict" into the more useful operation the user expects:
+		// "I want to take ownership of that third-party login."
+		var holder User
+		if err := s.db.First(&holder, existing.UserID).Error; err != nil {
+			return appendQuery(st.redirectURI, "bind_result", "internal_error")
+		}
+		stubLike := !holder.IsRoot &&
+			holder.MergedInto == nil &&
+			holder.PasswordHash == ""
+		if !stubLike {
+			return appendQuery(st.redirectURI, "bind_result", "conflict")
+		}
+		// Make sure the bind user doesn't already own this provider — would
+		// double-bind in the same provider slot after merge.
+		var sameProviderForUser OAuthAccount
+		err := s.db.Where("user_id = ? AND provider = ?", st.bindUserID, provider).
+			First(&sameProviderForUser).Error
+		if err == nil {
+			return appendQuery(st.redirectURI, "bind_result", "conflict")
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return appendQuery(st.redirectURI, "bind_result", "internal_error")
+		}
+		// Merge the stub into the current user. MergeUser moves the
+		// oauth_accounts row, casbin roles, profile leftovers, and tombstones
+		// the stub. After this, the third-party account is owned by st.bindUserID.
+		if err := MergeUser(s.db, permApply, st.bindUserID, holder.ID); err != nil {
+			return appendQuery(st.redirectURI, "bind_result", "internal_error")
+		}
+		return appendQuery(st.redirectURI, "bind_result", "success")
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return appendQuery(st.redirectURI, "bind_result", "internal_error")
