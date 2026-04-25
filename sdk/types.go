@@ -107,6 +107,15 @@ type CanonicalUserResponse struct {
 	} `json:"user"`
 }
 
+// OAuthTokenResponse is returned by GET /auth/oauth/accounts/:provider/token.
+// It exposes the user's third-party access token (already refreshed if needed)
+// for trusted downstream services to call provider APIs on the user's behalf.
+type OAuthTokenResponse struct {
+	AccessToken string     `json:"access_token"`
+	Scopes      []string   `json:"scopes"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
 // ---------- Storage ----------
 
 type File struct {

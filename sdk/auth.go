@@ -172,6 +172,23 @@ func (a *AuthService) GetOAuthAccounts() (*OAuthAccountsResponse, error) {
 	return &resp, nil
 }
 
+// GetOAuthToken returns the current user's access token for a third-party provider,
+// auto-refreshed by core if it has expired. Used by trusted downstream services
+// (e.g. blog server checking Discord guild membership for zone gates).
+//
+// Possible API errors:
+//   - 404 provider not linked
+//   - 410 no stored token (legacy row, must re-auth)
+//   - 401 token refresh failed (user revoked the app on provider side)
+func (a *AuthService) GetOAuthToken(provider string) (*OAuthTokenResponse, error) {
+	var resp OAuthTokenResponse
+	path := fmt.Sprintf("/auth/oauth/accounts/%s/token", provider)
+	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // UnlinkOAuth removes an OAuth account link for the given provider.
 func (a *AuthService) UnlinkOAuth(provider string) error {
 	return a.c.doJSON(http.MethodDelete, "/auth/oauth/accounts/"+provider, nil, nil, true)
