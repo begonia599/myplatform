@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // HandleOAuthAuthorize returns the OAuth authorization URL for the given provider
@@ -202,6 +203,52 @@ func (h *Handler) HandleOAuthCallback(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, redirectURL)
+}
+
+// HandleGetOAuthToken returns the current user's access_token for the given
+// provider. Used by trusted downstream services (e.g. the blog server) that
+// need to call provider APIs on behalf of the user — for example, checking
+// Discord guild membership for zone gates.
+//
+// Auth: requires the user's own JWT. The token is scoped to that user.
+//
+// Responses:
+//   - 200 {access_token, scopes, expires_at}
+//   - 404 {"error": "provider not linked"}
+//   - 410 {"error": "no stored token"}        — must re-auth (legacy account row)
+//   - 401 {"error": "token refresh failed"}   — user revoked the app on provider side
+func (h *Handler) HandleGetOAuthToken(c *gin.Context) {
+	cu, err := MustCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return
+	}
+	provider := c.Param("provider")
+	if h.oauthService == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "oauth not configured"})
+		return
+	}
+	accessToken, scopes, expiresAt, err := h.oauthService.GetValidAccessToken(cu.ID, provider)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "provider not linked"})
+		case errors.Is(err, ErrNoStoredToken):
+			c.JSON(http.StatusGone, gin.H{"error": "no stored token; re-authorization required"})
+		case errors.Is(err, ErrTokenRefresh):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token refresh failed; re-authorization required"})
+		case errors.Is(err, ErrUnsupportedProvider):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported provider"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"access_token": accessToken,
+		"scopes":       scopes,
+		"expires_at":   expiresAt,
+	})
 }
 
 // HandleOAuthExchange exchanges a one-time exchange_code for JWT tokens.

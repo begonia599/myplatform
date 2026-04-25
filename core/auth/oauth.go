@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +21,40 @@ var (
 	ErrInvalidState        = errors.New("invalid oauth state")
 	ErrInvalidExchangeCode = errors.New("invalid or expired exchange code")
 	ErrOAuthFailed         = errors.New("oauth exchange failed")
+	ErrProviderNotLinked   = errors.New("provider not linked for user")
+	ErrNoStoredToken       = errors.New("no stored access token; re-authorization required")
+	ErrTokenRefresh        = errors.New("oauth token refresh failed")
 )
+
+// tokenExpiryPtr returns a pointer to the token's expiry time, or nil when
+// the provider did not specify one (e.g. classic GitHub PATs never expire).
+func tokenExpiryPtr(tok *oauth2.Token) *time.Time {
+	if tok == nil || tok.Expiry.IsZero() {
+		return nil
+	}
+	e := tok.Expiry
+	return &e
+}
+
+// tokenUpdatesMap returns the column→value map used to persist token-related
+// fields onto an existing OAuthAccount row.
+func tokenUpdatesMap(tok *oauth2.Token, scopes []string) map[string]any {
+	return map[string]any{
+		"access_token":     tok.AccessToken,
+		"refresh_token":    tok.RefreshToken,
+		"token_expires_at": tokenExpiryPtr(tok),
+		"scopes":           strings.Join(scopes, " "),
+	}
+}
+
+// applyTokenFields populates token-related fields on a fresh OAuthAccount
+// before insertion.
+func applyTokenFields(acct *OAuthAccount, tok *oauth2.Token, scopes []string) {
+	acct.AccessToken = tok.AccessToken
+	acct.RefreshToken = tok.RefreshToken
+	acct.TokenExpiresAt = tokenExpiryPtr(tok)
+	acct.Scopes = strings.Join(scopes, " ")
+}
 
 // oauthMode distinguishes login (creates/finds user) from bind (links to current user).
 type oauthMode string
@@ -28,6 +62,13 @@ type oauthMode string
 const (
 	oauthModeLogin oauthMode = "login"
 	oauthModeBind  oauthMode = "bind"
+)
+
+// Default scopes per provider (login flow). Extended-scope flows (e.g. zone
+// gate checks) request additional scopes via the elevate endpoint.
+var (
+	scopesGitHubLogin  = []string{"read:user", "user:email"}
+	scopesDiscordLogin = []string{"identify"}
 )
 
 type oauthState struct {
@@ -61,7 +102,7 @@ func (s *OAuthService) githubConfig() *oauth2.Config {
 		ClientID:     s.cfg.OAuth.GitHub.ClientID,
 		ClientSecret: s.cfg.OAuth.GitHub.ClientSecret,
 		RedirectURL:  s.cfg.OAuth.GitHub.RedirectURL,
-		Scopes:       []string{"read:user", "user:email"},
+		Scopes:       scopesGitHubLogin,
 		Endpoint:     githubOAuth.Endpoint,
 	}
 }
@@ -167,6 +208,8 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 	defer cancel()
 
 	var providerUserID, email, avatarURL string
+	var oauthTok *oauth2.Token
+	var tokenScopes []string
 	switch provider {
 	case "github":
 		token, err := s.githubConfig().Exchange(ctx, code)
@@ -180,6 +223,8 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 		providerUserID = fmt.Sprintf("%d", ghUser.ID)
 		email = ghUser.Email
 		avatarURL = ghUser.AvatarURL
+		oauthTok = token
+		tokenScopes = scopesGitHubLogin
 	case "discord":
 		token, err := s.discordConfig().Exchange(ctx, code)
 		if err != nil {
@@ -193,6 +238,8 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 		if dcUser.Avatar != nil {
 			avatarURL = fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", dcUser.ID, *dcUser.Avatar)
 		}
+		oauthTok = token
+		tokenScopes = scopesDiscordLogin
 	default:
 		return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
 	}
@@ -237,6 +284,11 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 		if err := MergeUser(s.db, permApply, st.bindUserID, holder.ID); err != nil {
 			return appendQuery(st.redirectURI, "bind_result", "internal_error")
 		}
+		// Refresh the (now-current-user-owned) row's tokens with what we just
+		// got from the exchange — the stub's old tokens may be stale.
+		s.db.Model(&OAuthAccount{}).
+			Where("user_id = ? AND provider = ?", st.bindUserID, provider).
+			Updates(tokenUpdatesMap(oauthTok, tokenScopes))
 		return appendQuery(st.redirectURI, "bind_result", "success")
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -262,6 +314,7 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 		Email:          email,
 		AvatarURL:      avatarURL,
 	}
+	applyTokenFields(&link, oauthTok, tokenScopes)
 	if err := s.db.Create(&link).Error; err != nil {
 		return appendQuery(st.redirectURI, "bind_result", "internal_error")
 	}
@@ -312,10 +365,10 @@ func (s *OAuthService) githubCallback(authService *AuthService, permApply Permis
 	var oauthAccount OAuthAccount
 	err = s.db.Where("provider = ? AND provider_user_id = ?", "github", providerUserID).First(&oauthAccount).Error
 	if err == nil {
-		s.db.Model(&oauthAccount).Updates(map[string]any{
-			"email":      ghUser.Email,
-			"avatar_url": ghUser.AvatarURL,
-		})
+		updates := tokenUpdatesMap(token, scopesGitHubLogin)
+		updates["email"] = ghUser.Email
+		updates["avatar_url"] = ghUser.AvatarURL
+		s.db.Model(&oauthAccount).Updates(updates)
 		var user User
 		if err := s.db.First(&user, oauthAccount.UserID).Error; err != nil {
 			return nil, fmt.Errorf("auth: oauth user not found: %w", err)
@@ -372,6 +425,7 @@ func (s *OAuthService) githubCallback(authService *AuthService, permApply Permis
 			Email:          ghUser.Email,
 			AvatarURL:      ghUser.AvatarURL,
 		}
+		applyTokenFields(&oauthAccount, token, scopesGitHubLogin)
 		if err := tx.Create(&oauthAccount).Error; err != nil {
 			return fmt.Errorf("create oauth account: %w", err)
 		}
@@ -428,7 +482,7 @@ func (s *OAuthService) discordConfig() *oauth2.Config {
 		ClientID:     s.cfg.OAuth.Discord.ClientID,
 		ClientSecret: s.cfg.OAuth.Discord.ClientSecret,
 		RedirectURL:  s.cfg.OAuth.Discord.RedirectURL,
-		Scopes:       []string{"identify"},
+		Scopes:       scopesDiscordLogin,
 		Endpoint:     discordEndpoint,
 	}
 }
@@ -463,9 +517,9 @@ func (s *OAuthService) discordCallback(authService *AuthService, permApply Permi
 	var oauthAccount OAuthAccount
 	err = s.db.Where("provider = ? AND provider_user_id = ?", "discord", dcUser.ID).First(&oauthAccount).Error
 	if err == nil {
-		s.db.Model(&oauthAccount).Updates(map[string]any{
-			"avatar_url": avatarURL,
-		})
+		updates := tokenUpdatesMap(token, scopesDiscordLogin)
+		updates["avatar_url"] = avatarURL
+		s.db.Model(&oauthAccount).Updates(updates)
 		var user User
 		if err := s.db.First(&user, oauthAccount.UserID).Error; err != nil {
 			return nil, fmt.Errorf("auth: oauth user not found: %w", err)
@@ -520,6 +574,7 @@ func (s *OAuthService) discordCallback(authService *AuthService, permApply Permi
 			ProviderUserID: dcUser.ID,
 			AvatarURL:      avatarURL,
 		}
+		applyTokenFields(&oauthAccount, token, scopesDiscordLogin)
 		if err := tx.Create(&oauthAccount).Error; err != nil {
 			return fmt.Errorf("create oauth account: %w", err)
 		}
@@ -581,6 +636,79 @@ func (s *OAuthService) cleanup() {
 			return true
 		})
 	}
+}
+
+// GetValidAccessToken returns a usable access token for the given user and
+// provider, refreshing it via the stored refresh_token if it has expired or is
+// within 30 seconds of expiring. The returned scopes are those recorded at the
+// time of consent, parsed from the space-separated string in the database.
+//
+// Errors:
+//   - gorm.ErrRecordNotFound — user has no OAuth account for that provider
+//   - ErrNoStoredToken       — account exists but predates token persistence
+//     (user must re-auth to populate the token)
+//   - ErrTokenRefresh        — refresh failed (user revoked the app, network)
+//   - ErrUnsupportedProvider — provider name not recognized
+func (s *OAuthService) GetValidAccessToken(userID uint, provider string) (string, []string, *time.Time, error) {
+	var acct OAuthAccount
+	if err := s.db.Where("user_id = ? AND provider = ?", userID, provider).First(&acct).Error; err != nil {
+		return "", nil, nil, err
+	}
+	if acct.AccessToken == "" {
+		return "", nil, nil, ErrNoStoredToken
+	}
+	scopes := splitScopes(acct.Scopes)
+	// No expiry recorded — token is treated as long-lived (e.g. classic GH PATs).
+	if acct.TokenExpiresAt == nil {
+		return acct.AccessToken, scopes, nil, nil
+	}
+	// Still fresh — return as-is. 30s safety margin avoids racing the clock.
+	if time.Until(*acct.TokenExpiresAt) > 30*time.Second {
+		return acct.AccessToken, scopes, acct.TokenExpiresAt, nil
+	}
+	// Need to refresh. Discord requires a refresh_token; if none recorded,
+	// the user must re-authorize.
+	if acct.RefreshToken == "" {
+		return "", nil, nil, ErrTokenRefresh
+	}
+	var cfg *oauth2.Config
+	switch provider {
+	case "github":
+		cfg = s.githubConfig()
+	case "discord":
+		cfg = s.discordConfig()
+	default:
+		return "", nil, nil, ErrUnsupportedProvider
+	}
+	src := cfg.TokenSource(context.Background(), &oauth2.Token{
+		AccessToken:  acct.AccessToken,
+		RefreshToken: acct.RefreshToken,
+		Expiry:       *acct.TokenExpiresAt,
+	})
+	fresh, err := src.Token()
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("%w: %v", ErrTokenRefresh, err)
+	}
+	// Persist refreshed values. Note: providers may rotate the refresh_token,
+	// so we always overwrite both fields.
+	updates := map[string]any{
+		"access_token":     fresh.AccessToken,
+		"refresh_token":    fresh.RefreshToken,
+		"token_expires_at": tokenExpiryPtr(fresh),
+	}
+	if err := s.db.Model(&acct).Updates(updates).Error; err != nil {
+		return "", nil, nil, fmt.Errorf("auth: persist refreshed token: %w", err)
+	}
+	return fresh.AccessToken, scopes, tokenExpiryPtr(fresh), nil
+}
+
+// splitScopes parses a space-separated scope string. Empty input returns nil.
+func splitScopes(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return strings.Fields(s)
 }
 
 func appendQuery(rawURL, key, value string) string {

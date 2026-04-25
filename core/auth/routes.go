@@ -21,6 +21,9 @@ func RegisterRoutes(router *gin.Engine, service *AuthService, rootService *RootS
 	g.PUT("/password", AuthMiddleware(service), h.HandleChangePassword)
 	g.GET("/oauth/accounts", AuthMiddleware(service), h.HandleGetOAuthAccounts)
 	g.DELETE("/oauth/accounts/:provider", AuthMiddleware(service), h.HandleUnlinkOAuth)
+	// Returns a usable provider access_token for the current user (auto-refreshed).
+	// Used by downstream services that need to call provider APIs on behalf of the user.
+	g.GET("/oauth/accounts/:provider/token", AuthMiddleware(service), h.HandleGetOAuthToken)
 	g.POST("/oauth/link-existing", AuthMiddleware(service), h.HandleLinkExisting)
 
 	// Canonical user lookup (follows merged_into chain).
