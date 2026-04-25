@@ -132,8 +132,8 @@ func (h *Handler) HandleLinkExisting(c *gin.Context) {
 	// Merge: secondary = current OAuth-only user, primary = the local user.
 	if err := MergeUser(h.db, h.permApply, primary.ID, cu.ID); err != nil {
 		switch {
-		case errors.Is(err, ErrMergeRootInvolved):
-			c.JSON(http.StatusForbidden, gin.H{"error": "root user cannot be merged"})
+		case errors.Is(err, ErrMergeRootSecondary):
+			c.JSON(http.StatusForbidden, gin.H{"error": "current user is root and cannot be merged away"})
 		case errors.Is(err, ErrMergeAlreadyMerged):
 			c.JSON(http.StatusConflict, gin.H{"error": "one of the users is already merged"})
 		case errors.Is(err, ErrMergeUserNotFound):

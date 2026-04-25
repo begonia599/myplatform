@@ -9,7 +9,7 @@ import (
 
 var (
 	ErrMergeSelf          = errors.New("cannot merge a user into itself")
-	ErrMergeRootInvolved  = errors.New("cannot merge root user")
+	ErrMergeRootSecondary = errors.New("cannot merge a root user away (would delete root)")
 	ErrMergeAlreadyMerged = errors.New("user is already merged")
 	ErrMergeUserNotFound  = errors.New("user not found for merge")
 )
@@ -45,8 +45,10 @@ func MergeUser(db *gorm.DB, perm PermissionApplier, primaryID, secondaryID uint)
 		}
 		return fmt.Errorf("auth: load secondary user: %w", err)
 	}
-	if primary.IsRoot || secondary.IsRoot {
-		return ErrMergeRootInvolved
+	// Refuse only when secondary is root — that would delete the root user.
+	// Allow primary=root: the root simply gains an additional OAuth login.
+	if secondary.IsRoot {
+		return ErrMergeRootSecondary
 	}
 	if primary.MergedInto != nil || secondary.MergedInto != nil {
 		return ErrMergeAlreadyMerged
