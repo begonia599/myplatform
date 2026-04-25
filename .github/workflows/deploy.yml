@@ -25,7 +25,7 @@ jobs:
             git pull origin main
 
             # Write secrets to .env (docker compose reads automatically)
-            cat > /opt/myplatform/.env << 'ENVEOF'
+            cat > /opt/myplatform/.env << ENVEOF
             MYPLATFORM_AUTH_JWT_SECRET=$MYPLATFORM_AUTH_JWT_SECRET
             MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID=$MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_ID
             MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET=$MYPLATFORM_AUTH_OAUTH_GITHUB_CLIENT_SECRET
