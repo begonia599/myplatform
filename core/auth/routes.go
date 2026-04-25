@@ -21,9 +21,15 @@ func RegisterRoutes(router *gin.Engine, service *AuthService, rootService *RootS
 	g.PUT("/password", AuthMiddleware(service), h.HandleChangePassword)
 	g.GET("/oauth/accounts", AuthMiddleware(service), h.HandleGetOAuthAccounts)
 	g.DELETE("/oauth/accounts/:provider", AuthMiddleware(service), h.HandleUnlinkOAuth)
+	g.POST("/oauth/link-existing", AuthMiddleware(service), h.HandleLinkExisting)
+
+	// Canonical user lookup (follows merged_into chain).
+	// Used by external apps to resolve stale user IDs to the active user.
+	g.GET("/users/:id/canonical", AuthMiddleware(service), h.HandleGetCanonicalUser)
 
 	// OAuth login flow (wildcard :provider)
 	g.GET("/oauth/:provider", h.HandleOAuthAuthorize)
+	g.GET("/oauth/:provider/bind", AuthMiddleware(service), h.HandleOAuthBindAuthorize)
 	g.GET("/oauth/:provider/callback", h.HandleOAuthCallback)
 	g.POST("/oauth/exchange", h.HandleOAuthExchange)
 

@@ -102,6 +102,38 @@ func (s *PermissionService) SyncUserRole(userID uint, role string) error {
 	return err
 }
 
+// MigrateUserSubject moves all Casbin role assignments and direct
+// permissions from fromUserID to toUserID. Used during account merge.
+// Operations are idempotent: existing role assignments on toUserID
+// are preserved.
+func (s *PermissionService) MigrateUserSubject(fromUserID, toUserID uint) error {
+	if fromUserID == toUserID {
+		return nil
+	}
+	fromSub := UserSubject(fromUserID)
+	toSub := UserSubject(toUserID)
+
+	// Copy role assignments (g rules).
+	roles, err := s.enforcer.GetRolesForUser(fromSub)
+	if err != nil {
+		return fmt.Errorf("permission: get roles for %s: %w", fromSub, err)
+	}
+	for _, r := range roles {
+		if _, err := s.enforcer.AddGroupingPolicy(toSub, r); err != nil {
+			return fmt.Errorf("permission: copy role %s to %s: %w", r, toSub, err)
+		}
+	}
+
+	// Drop the old subject's role assignments and any direct policies.
+	if _, err := s.enforcer.DeleteRolesForUser(fromSub); err != nil {
+		return fmt.Errorf("permission: delete roles for %s: %w", fromSub, err)
+	}
+	if _, err := s.enforcer.DeletePermissionsForUser(fromSub); err != nil {
+		return fmt.Errorf("permission: delete permissions for %s: %w", fromSub, err)
+	}
+	return nil
+}
+
 // seedDefaults inserts default policies if they don't already exist,
 // and registers platform permissions into the registry.
 func (s *PermissionService) seedDefaults(db *gorm.DB) {

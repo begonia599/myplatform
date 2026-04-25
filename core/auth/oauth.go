@@ -22,9 +22,19 @@ var (
 	ErrOAuthFailed         = errors.New("oauth exchange failed")
 )
 
+// oauthMode distinguishes login (creates/finds user) from bind (links to current user).
+type oauthMode string
+
+const (
+	oauthModeLogin oauthMode = "login"
+	oauthModeBind  oauthMode = "bind"
+)
+
 type oauthState struct {
 	createdAt   time.Time
 	redirectURI string
+	mode        oauthMode
+	bindUserID  uint // only set when mode == bind
 }
 
 type exchangeEntry struct {
@@ -56,9 +66,22 @@ func (s *OAuthService) githubConfig() *oauth2.Config {
 	}
 }
 
-// Authorize returns the OAuth authorization URL for the given provider.
-// redirectURI is the business frontend URL to redirect back to after auth.
+// Authorize returns the OAuth authorization URL for the given provider in
+// login mode (creates or finds a user).
 func (s *OAuthService) Authorize(provider, redirectURI string) (string, error) {
+	return s.authorize(provider, redirectURI, oauthModeLogin, 0)
+}
+
+// AuthorizeBind returns the OAuth authorization URL for the given provider in
+// bind mode (links the third-party account to bindUserID).
+func (s *OAuthService) AuthorizeBind(provider, redirectURI string, bindUserID uint) (string, error) {
+	if bindUserID == 0 {
+		return "", errors.New("auth: bindUserID is required for bind mode")
+	}
+	return s.authorize(provider, redirectURI, oauthModeBind, bindUserID)
+}
+
+func (s *OAuthService) authorize(provider, redirectURI string, mode oauthMode, bindUserID uint) (string, error) {
 	switch provider {
 	case "github", "discord":
 		state, err := randomHex(16)
@@ -68,6 +91,8 @@ func (s *OAuthService) Authorize(provider, redirectURI string) (string, error) {
 		s.states.Store(state, oauthState{
 			createdAt:   time.Now(),
 			redirectURI: redirectURI,
+			mode:        mode,
+			bindUserID:  bindUserID,
 		})
 		var cfg *oauth2.Config
 		switch provider {
@@ -83,7 +108,11 @@ func (s *OAuthService) Authorize(provider, redirectURI string) (string, error) {
 }
 
 // Callback handles the OAuth callback from the provider.
-// Returns the redirect URL (business frontend + exchange_code) to 302 to.
+//
+// In login mode it returns a redirect URL to the business frontend with an
+// exchange_code query param. In bind mode it links the third-party account
+// to the user recorded in state and returns a redirect URL with a
+// bind_result query param ("success" or an error code).
 func (s *OAuthService) Callback(authService *AuthService, permApply PermissionApplier, provider, code, state string) (string, error) {
 	val, loaded := s.states.LoadAndDelete(state)
 	if !loaded {
@@ -91,6 +120,11 @@ func (s *OAuthService) Callback(authService *AuthService, permApply PermissionAp
 	}
 	st := val.(oauthState)
 
+	if st.mode == oauthModeBind {
+		return s.bindCallback(provider, code, st), nil
+	}
+
+	// Default: login mode.
 	var user *User
 	var err error
 	switch provider {
@@ -117,6 +151,89 @@ func (s *OAuthService) Callback(authService *AuthService, permApply PermissionAp
 	})
 
 	return appendQuery(st.redirectURI, "exchange_code", exchangeCode), nil
+}
+
+// bindCallback links the third-party account to st.bindUserID without creating
+// or switching users. Returns a redirect URL with a bind_result query param.
+//
+// Possible bind_result values:
+//   - "success"           — newly bound to current user
+//   - "already_bound"     — already bound to current user (idempotent)
+//   - "conflict"          — bound to a different user
+//   - "oauth_failed"      — provider exchange/userinfo error
+//   - "internal_error"    — DB error
+func (s *OAuthService) bindCallback(provider, code string, st oauthState) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var providerUserID, email, avatarURL string
+	switch provider {
+	case "github":
+		token, err := s.githubConfig().Exchange(ctx, code)
+		if err != nil {
+			return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
+		}
+		ghUser, err := s.fetchGitHubUser(ctx, token.AccessToken)
+		if err != nil {
+			return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
+		}
+		providerUserID = fmt.Sprintf("%d", ghUser.ID)
+		email = ghUser.Email
+		avatarURL = ghUser.AvatarURL
+	case "discord":
+		token, err := s.discordConfig().Exchange(ctx, code)
+		if err != nil {
+			return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
+		}
+		dcUser, err := s.fetchDiscordUser(ctx, token.AccessToken)
+		if err != nil {
+			return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
+		}
+		providerUserID = dcUser.ID
+		if dcUser.Avatar != nil {
+			avatarURL = fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", dcUser.ID, *dcUser.Avatar)
+		}
+	default:
+		return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
+	}
+
+	// Look up any existing OAuth row for this provider/providerUserID.
+	var existing OAuthAccount
+	err := s.db.Where("provider = ? AND provider_user_id = ?", provider, providerUserID).
+		First(&existing).Error
+	if err == nil {
+		if existing.UserID == st.bindUserID {
+			return appendQuery(st.redirectURI, "bind_result", "already_bound")
+		}
+		return appendQuery(st.redirectURI, "bind_result", "conflict")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return appendQuery(st.redirectURI, "bind_result", "internal_error")
+	}
+
+	// Also enforce one-account-per-provider on the bindUser side.
+	var sameProviderForUser OAuthAccount
+	err = s.db.Where("user_id = ? AND provider = ?", st.bindUserID, provider).
+		First(&sameProviderForUser).Error
+	if err == nil {
+		return appendQuery(st.redirectURI, "bind_result", "conflict")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return appendQuery(st.redirectURI, "bind_result", "internal_error")
+	}
+
+	// Create the link.
+	link := OAuthAccount{
+		UserID:         st.bindUserID,
+		Provider:       provider,
+		ProviderUserID: providerUserID,
+		Email:          email,
+		AvatarURL:      avatarURL,
+	}
+	if err := s.db.Create(&link).Error; err != nil {
+		return appendQuery(st.redirectURI, "bind_result", "internal_error")
+	}
+	return appendQuery(st.redirectURI, "bind_result", "success")
 }
 
 // Exchange validates an exchange code and returns the associated user ID.
@@ -285,11 +402,11 @@ func (s *OAuthService) discordConfig() *oauth2.Config {
 }
 
 type discordUser struct {
-	ID            string  `json:"id"`
-	Username      string  `json:"username"`
-	GlobalName    *string `json:"global_name"`
-	Avatar        *string `json:"avatar"`
-	Email         string  `json:"email"`
+	ID         string  `json:"id"`
+	Username   string  `json:"username"`
+	GlobalName *string `json:"global_name"`
+	Avatar     *string `json:"avatar"`
+	Email      string  `json:"email"`
 }
 
 func (s *OAuthService) discordCallback(authService *AuthService, permApply PermissionApplier, code string) (*User, error) {

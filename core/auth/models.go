@@ -14,6 +14,7 @@ type User struct {
 	Role         string         `gorm:"size:32;not null;default:user" json:"role"`
 	Status       string         `gorm:"size:32;not null;default:active" json:"status"`
 	IsRoot       bool           `gorm:"not null;default:false" json:"is_root"`
+	MergedInto   *uint          `gorm:"index" json:"merged_into,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`

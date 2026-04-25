@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,10 @@ import (
 // This avoids a circular import between auth and permission packages.
 type PermissionApplier interface {
 	ApplyDefaultPolicies(db *gorm.DB, userID uint, role string) error
+	// MigrateUserSubject moves all Casbin role assignments and direct
+	// permissions from one user subject to another (idempotent).
+	// Used during account merge.
+	MigrateUserSubject(fromUserID, toUserID uint) error
 }
 
 type Handler struct {
@@ -404,6 +409,37 @@ func (h *Handler) HandleUnlinkOAuth(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "oauth account unlinked"})
+}
+
+// HandleGetCanonicalUser resolves a user ID through the merged_into chain
+// and returns the active canonical user. External apps holding stale
+// user IDs (from before a merge) call this to find the current owner.
+func (h *Handler) HandleGetCanonicalUser(c *gin.Context) {
+	idStr := c.Param("id")
+	parsed, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || parsed == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+	id := uint(parsed)
+
+	user, err := h.service.GetCanonicalUserByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"requested_id": id,
+		"canonical_id": user.ID,
+		"merged":       user.ID != id,
+		"user": gin.H{
+			"id":       user.ID,
+			"username": user.Username,
+			"role":     user.Role,
+			"status":   user.Status,
+		},
+	})
 }
 
 // ==================== Root Endpoints ====================
