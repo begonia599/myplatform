@@ -8,10 +8,10 @@ import (
 )
 
 var (
-	ErrMergeSelf            = errors.New("cannot merge a user into itself")
-	ErrMergeRootInvolved    = errors.New("cannot merge root user")
-	ErrMergeAlreadyMerged   = errors.New("user is already merged")
-	ErrMergeUserNotFound    = errors.New("user not found for merge")
+	ErrMergeSelf          = errors.New("cannot merge a user into itself")
+	ErrMergeRootInvolved  = errors.New("cannot merge root user")
+	ErrMergeAlreadyMerged = errors.New("user is already merged")
+	ErrMergeUserNotFound  = errors.New("user not found for merge")
 )
 
 // MergeUser merges the secondary user into the primary user atomically.
@@ -165,4 +165,52 @@ func (s *AuthService) Canonical(id uint) uint {
 func (s *AuthService) GetCanonicalUserByID(id uint) (*User, error) {
 	canonicalID := s.Canonical(id)
 	return s.GetUserByID(canonicalID)
+}
+
+// PurgeMergedUser permanently removes a tombstone (a user that has been
+// merged into another). The caller must be either an admin/root or the
+// canonical user (the merge target). All remaining auxiliary rows
+// (refresh_tokens, profile leftovers) are also hard-deleted.
+//
+// Returns ErrMergeUserNotFound if the user does not exist;
+// errors.New("user is not merged") if the user has no merged_into;
+// errors.New("forbidden") if callerID is neither admin nor the merge target.
+func (s *AuthService) PurgeMergedUser(callerID, targetID uint) error {
+	var caller User
+	if err := s.db.First(&caller, callerID).Error; err != nil {
+		return fmt.Errorf("auth: load caller: %w", err)
+	}
+
+	var target User
+	// Use Unscoped to find soft-deleted tombstones.
+	if err := s.db.Unscoped().First(&target, targetID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMergeUserNotFound
+		}
+		return fmt.Errorf("auth: load target: %w", err)
+	}
+	if target.MergedInto == nil {
+		return errors.New("user is not merged")
+	}
+	if !caller.IsRoot && caller.Role != "admin" && *target.MergedInto != callerID {
+		return errors.New("forbidden")
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Drop any remaining child rows that referenced the tombstone.
+		if err := tx.Unscoped().Where("user_id = ?", targetID).Delete(&UserProfile{}).Error; err != nil {
+			return fmt.Errorf("delete profile: %w", err)
+		}
+		if err := tx.Unscoped().Where("user_id = ?", targetID).Delete(&RefreshToken{}).Error; err != nil {
+			return fmt.Errorf("delete refresh tokens: %w", err)
+		}
+		if err := tx.Unscoped().Where("user_id = ?", targetID).Delete(&OAuthAccount{}).Error; err != nil {
+			return fmt.Errorf("delete oauth accounts: %w", err)
+		}
+		// Hard-delete the user row itself.
+		if err := tx.Unscoped().Delete(&User{}, targetID).Error; err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
+		return nil
+	})
 }

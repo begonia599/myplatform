@@ -160,7 +160,9 @@ func (h *Handler) HandleLinkExisting(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "accounts linked",
+		"message":      "accounts linked",
+		"primary_id":   primary.ID,
+		"secondary_id": cu.ID, // tombstone — caller may want to migrate own data and call purge
 		"tokens": TokenResponse{
 			AccessToken:  newAccess,
 			RefreshToken: newRefresh,

@@ -26,6 +26,8 @@ func RegisterRoutes(router *gin.Engine, service *AuthService, rootService *RootS
 	// Canonical user lookup (follows merged_into chain).
 	// Used by external apps to resolve stale user IDs to the active user.
 	g.GET("/users/:id/canonical", AuthMiddleware(service), h.HandleGetCanonicalUser)
+	// Hard-delete a tombstone. Caller must be the merge target or admin.
+	g.DELETE("/users/:id/purge", AuthMiddleware(service), h.HandlePurgeUser)
 
 	// OAuth login flow (wildcard :provider)
 	g.GET("/oauth/:provider", h.HandleOAuthAuthorize)

@@ -177,3 +177,53 @@ func (a *AuthService) UnlinkOAuth(provider string) error {
 	return a.c.doJSON(http.MethodDelete, "/auth/oauth/accounts/"+provider, nil, nil, true)
 }
 
+// OAuthBindAuthorize returns the OAuth authorization URL in bind mode.
+// The callback will link the third-party account to the currently
+// authenticated user (no new user is created).
+//
+// On the redirect_uri, look for ?bind_result=success|already_bound|conflict|oauth_failed|internal_error.
+func (a *AuthService) OAuthBindAuthorize(provider, redirectURI string) (*OAuthAuthorizeResponse, error) {
+	path := fmt.Sprintf("/auth/oauth/%s/bind?redirect_uri=%s", provider, redirectURI)
+	var resp OAuthAuthorizeResponse
+	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// LinkExisting merges the currently authenticated (OAuth-only) user into a
+// verified local account. Returns new tokens for the local account and the
+// secondary (tombstone) ID. The caller should migrate any business-owned
+// user_id references to PrimaryID, then call PurgeUser(SecondaryID).
+//
+// The new tokens are NOT auto-stored on the client because the caller may
+// want to perform business-side migrations using the secondary's identity
+// before switching identity.
+func (a *AuthService) LinkExisting(username, password string) (*LinkExistingResponse, error) {
+	body := map[string]string{
+		"username": username,
+		"password": password,
+	}
+	var resp LinkExistingResponse
+	if err := a.c.doJSON(http.MethodPost, "/auth/oauth/link-existing", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetCanonicalUser resolves a (possibly merged) user ID to the active user.
+func (a *AuthService) GetCanonicalUser(id uint) (*CanonicalUserResponse, error) {
+	path := fmt.Sprintf("/auth/users/%d/canonical", id)
+	var resp CanonicalUserResponse
+	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PurgeUser hard-deletes a tombstone (a user that has been merged).
+// Caller must be the merge target or admin/root.
+func (a *AuthService) PurgeUser(id uint) error {
+	path := fmt.Sprintf("/auth/users/%d/purge", id)
+	return a.c.doJSON(http.MethodDelete, path, nil, nil, true)
+}

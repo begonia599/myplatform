@@ -76,6 +76,37 @@ type OAuthAccountsResponse struct {
 	HasPassword bool               `json:"has_password"`
 }
 
+// LinkExistingResponse is returned by POST /auth/oauth/link-existing.
+//
+// Tokens are for the canonical (primary) user. SecondaryID is the
+// tombstone left behind in core; the caller should migrate any
+// business-owned user_id references to PrimaryID and then DELETE
+// /auth/users/{SecondaryID}/purge.
+type LinkExistingResponse struct {
+	Message     string    `json:"message"`
+	PrimaryID   uint      `json:"primary_id"`
+	SecondaryID uint      `json:"secondary_id"`
+	Tokens      TokenPair `json:"tokens"`
+	User        struct {
+		ID       uint   `json:"id"`
+		Username string `json:"username"`
+		Role     string `json:"role"`
+	} `json:"user"`
+}
+
+// CanonicalUserResponse is returned by GET /auth/users/:id/canonical.
+type CanonicalUserResponse struct {
+	RequestedID uint `json:"requested_id"`
+	CanonicalID uint `json:"canonical_id"`
+	Merged      bool `json:"merged"`
+	User        struct {
+		ID       uint   `json:"id"`
+		Username string `json:"username"`
+		Role     string `json:"role"`
+		Status   string `json:"status"`
+	} `json:"user"`
+}
+
 // ---------- Storage ----------
 
 type File struct {
@@ -175,4 +206,3 @@ type ImageListResponse struct {
 	Page     int     `json:"page"`
 	PageSize int     `json:"page_size"`
 }
-

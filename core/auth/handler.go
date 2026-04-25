@@ -442,6 +442,44 @@ func (h *Handler) HandleGetCanonicalUser(c *gin.Context) {
 	})
 }
 
+// HandlePurgeUser permanently removes a tombstone (a previously-merged user).
+// Only the merge target (or admin/root) may purge a tombstone.
+//
+// Typical caller sequence after POST /auth/oauth/link-existing:
+//  1. Migrate own (business app) tables: UPDATE ... SET user_id = primary_id WHERE user_id = secondary_id;
+//  2. DELETE /auth/users/<secondary_id>/purge (with primary's token).
+func (h *Handler) HandlePurgeUser(c *gin.Context) {
+	cu, err := MustCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return
+	}
+
+	idStr := c.Param("id")
+	parsed, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || parsed == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+	targetID := uint(parsed)
+
+	if err := h.service.PurgeMergedUser(cu.ID, targetID); err != nil {
+		switch {
+		case errors.Is(err, ErrMergeUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		case err.Error() == "forbidden":
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the merge target or admin may purge"})
+		case err.Error() == "user is not merged":
+			c.JSON(http.StatusBadRequest, gin.H{"error": "user is not merged; refuse to hard-delete an active user"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user purged", "user_id": targetID})
+}
+
 // ==================== Root Endpoints ====================
 
 type RootOTPRequest struct {
