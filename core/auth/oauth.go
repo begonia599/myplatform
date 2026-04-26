@@ -75,7 +75,8 @@ type oauthState struct {
 	createdAt   time.Time
 	redirectURI string
 	mode        oauthMode
-	bindUserID  uint // only set when mode == bind
+	bindUserID  uint     // only set when mode == bind
+	extraScopes []string // extra provider scopes requested (e.g. guilds, guilds.members.read)
 }
 
 type exchangeEntry struct {
@@ -115,14 +116,23 @@ func (s *OAuthService) Authorize(provider, redirectURI string) (string, error) {
 
 // AuthorizeBind returns the OAuth authorization URL for the given provider in
 // bind mode (links the third-party account to bindUserID).
-func (s *OAuthService) AuthorizeBind(provider, redirectURI string, bindUserID uint) (string, error) {
+//
+// extraScopes allows the caller to request additional provider scopes beyond
+// the login defaults (e.g. "guilds", "guilds.members.read" for zone gate
+// checks). The extra scopes are merged with the provider's login defaults
+// and persisted on the resulting OAuthAccount row.
+func (s *OAuthService) AuthorizeBind(provider, redirectURI string, bindUserID uint, extraScopes []string) (string, error) {
 	if bindUserID == 0 {
 		return "", errors.New("auth: bindUserID is required for bind mode")
 	}
-	return s.authorize(provider, redirectURI, oauthModeBind, bindUserID)
+	return s.authorize(provider, redirectURI, oauthModeBind, bindUserID, extraScopes)
 }
 
-func (s *OAuthService) authorize(provider, redirectURI string, mode oauthMode, bindUserID uint) (string, error) {
+func (s *OAuthService) authorize(provider, redirectURI string, mode oauthMode, bindUserID uint, extra ...[]string) (string, error) {
+	var extraScopes []string
+	if len(extra) > 0 {
+		extraScopes = extra[0]
+	}
 	switch provider {
 	case "github", "discord":
 		state, err := randomHex(16)
@@ -134,6 +144,7 @@ func (s *OAuthService) authorize(provider, redirectURI string, mode oauthMode, b
 			redirectURI: redirectURI,
 			mode:        mode,
 			bindUserID:  bindUserID,
+			extraScopes: extraScopes,
 		})
 		var cfg *oauth2.Config
 		switch provider {
@@ -142,10 +153,36 @@ func (s *OAuthService) authorize(provider, redirectURI string, mode oauthMode, b
 		case "discord":
 			cfg = s.discordConfig()
 		}
+		// Merge extra scopes into the auth URL without mutating the shared config.
+		if len(extraScopes) > 0 {
+			merged := mergeScopes(cfg.Scopes, extraScopes)
+			copy := *cfg
+			copy.Scopes = merged
+			cfg = &copy
+		}
 		return cfg.AuthCodeURL(state), nil
 	default:
 		return "", ErrUnsupportedProvider
 	}
+}
+
+// mergeScopes returns a de-duplicated union of two scope slices.
+func mergeScopes(base, extra []string) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, s := range base {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range extra {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Callback handles the OAuth callback from the provider.
@@ -224,7 +261,7 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 		email = ghUser.Email
 		avatarURL = ghUser.AvatarURL
 		oauthTok = token
-		tokenScopes = scopesGitHubLogin
+		tokenScopes = mergeScopes(scopesGitHubLogin, st.extraScopes)
 	case "discord":
 		token, err := s.discordConfig().Exchange(ctx, code)
 		if err != nil {
@@ -239,7 +276,7 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 			avatarURL = fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", dcUser.ID, *dcUser.Avatar)
 		}
 		oauthTok = token
-		tokenScopes = scopesDiscordLogin
+		tokenScopes = mergeScopes(scopesDiscordLogin, st.extraScopes)
 	default:
 		return appendQuery(st.redirectURI, "bind_result", "oauth_failed")
 	}

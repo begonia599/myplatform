@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -49,6 +50,7 @@ func (h *Handler) HandleOAuthBindAuthorize(c *gin.Context) {
 
 	provider := c.Param("provider")
 	redirectURI := c.Query("redirect_uri")
+	scopesRaw := c.Query("scopes") // optional space-separated extra scopes
 
 	if h.oauthService == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "oauth not configured"})
@@ -59,7 +61,17 @@ func (h *Handler) HandleOAuthBindAuthorize(c *gin.Context) {
 		return
 	}
 
-	authURL, err := h.oauthService.AuthorizeBind(provider, redirectURI, cu.ID)
+	var extraScopes []string
+	if scopesRaw != "" {
+		for _, s := range strings.Split(scopesRaw, " ") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				extraScopes = append(extraScopes, s)
+			}
+		}
+	}
+
+	authURL, err := h.oauthService.AuthorizeBind(provider, redirectURI, cu.ID, extraScopes)
 	if err != nil {
 		if err == ErrUnsupportedProvider {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported provider"})

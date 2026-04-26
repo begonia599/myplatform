@@ -3,6 +3,8 @@ package sdk
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -198,9 +200,17 @@ func (a *AuthService) UnlinkOAuth(provider string) error {
 // The callback will link the third-party account to the currently
 // authenticated user (no new user is created).
 //
+// extraScopes (optional) requests additional provider scopes beyond the login
+// defaults — e.g. "guilds guilds.members.read" for Discord zone gate checks.
+// Pass nil or empty to keep the defaults.
+//
 // On the redirect_uri, look for ?bind_result=success|already_bound|conflict|oauth_failed|internal_error.
-func (a *AuthService) OAuthBindAuthorize(provider, redirectURI string) (*OAuthAuthorizeResponse, error) {
+func (a *AuthService) OAuthBindAuthorize(provider, redirectURI string, extraScopes ...string) (*OAuthAuthorizeResponse, error) {
 	path := fmt.Sprintf("/auth/oauth/%s/bind?redirect_uri=%s", provider, redirectURI)
+	if len(extraScopes) > 0 {
+		scopes := strings.Join(extraScopes, " ")
+		path += "&scopes=" + url.QueryEscape(scopes)
+	}
 	var resp OAuthAuthorizeResponse
 	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, err
