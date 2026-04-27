@@ -287,9 +287,12 @@ func (s *OAuthService) bindCallback(provider, code string, st oauthState, permAp
 		First(&existing).Error
 	if err == nil {
 		if existing.UserID == st.bindUserID {
+			// Scope upgrade: refresh tokens and scopes even though the
+			// account is already linked — the caller may have requested
+			// additional scopes (e.g. guilds.members.read for zone gating).
+			s.db.Model(&existing).Updates(tokenUpdatesMap(oauthTok, tokenScopes))
 			return appendQuery(st.redirectURI, "bind_result", "already_bound")
 		}
-		// The provider account is currently held by another user. If that
 		// user is just an OAuth-only stub (no password set, not root, not
 		// already merged), absorb them into the current user — this turns
 		// a "conflict" into the more useful operation the user expects:
