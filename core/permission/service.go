@@ -194,6 +194,6 @@ func (s *PermissionService) seedDefaults(db *gorm.DB) {
 		{Resource: "registry", Actions: []string{"read"}, Description: "Permission registry"},
 	}
 	if db != nil {
-		s.RegisterPermissions(db, "platform", platformDefs)
+		s.RegisterPermissions(db, "platform", platformDefs, nil)
 	}
 }

@@ -163,6 +163,7 @@ func (h *Handler) HandleRemoveRole(c *gin.Context) {
 type RegisterPermissionsRequest struct {
 	Module    string        `json:"module" binding:"required"`
 	Resources []ResourceDef `json:"resources" binding:"required"`
+	Grants    []RoleGrant   `json:"grants"`
 }
 
 // HandleRegisterPermissions registers permission definitions for a business module.
@@ -173,7 +174,7 @@ func (h *Handler) HandleRegisterPermissions(c *gin.Context) {
 		return
 	}
 
-	created, err := h.service.RegisterPermissions(h.db, req.Module, req.Resources)
+	created, err := h.service.RegisterPermissions(h.db, req.Module, req.Resources, req.Grants)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register permissions"})
 		return

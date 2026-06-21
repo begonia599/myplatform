@@ -26,10 +26,24 @@ type ResourceDef struct {
 	Description string   `json:"description"`
 }
 
+// RoleGrant declares a default role→permission policy a module wants seeded at
+// registration. The object is namespaced to {module}.{resource} so it matches
+// how business modules check permissions (e.g. "blog.comment"). Idempotent.
+type RoleGrant struct {
+	Role     string `json:"role"`
+	Resource string `json:"resource"`
+	Action   string `json:"action"`
+}
+
 // RegisterPermissions idempotently registers permission definitions for a module.
 // Existing entries are not duplicated; new ones are inserted.
 // Automatically creates Casbin policies for admin and user roles.
-func (s *PermissionService) RegisterPermissions(db *gorm.DB, module string, defs []ResourceDef) (int, error) {
+//
+// grants optionally declare default role→permission policies for this module,
+// seeded with a {module}.{resource} object (matching how business modules
+// check), so non-admin roles work on a fresh database without manual
+// assignment. Idempotent.
+func (s *PermissionService) RegisterPermissions(db *gorm.DB, module string, defs []ResourceDef, grants []RoleGrant) (int, error) {
 	created := 0
 	for _, def := range defs {
 		for _, action := range def.Actions {
@@ -53,6 +67,16 @@ func (s *PermissionService) RegisterPermissions(db *gorm.DB, module string, defs
 			s.enforcer.AddPolicy("admin", def.Resource, action)
 			s.enforcer.AddPolicy("user", def.Resource, action)
 		}
+	}
+
+	// Seed declared default role grants using the namespaced object so they
+	// match how business modules check (e.g. "blog.comment"). Idempotent —
+	// AddPolicy is a no-op if the rule already exists.
+	for _, g := range grants {
+		if g.Role == "" || g.Resource == "" || g.Action == "" {
+			continue
+		}
+		s.enforcer.AddPolicy(g.Role, module+"."+g.Resource, g.Action)
 	}
 	return created, nil
 }

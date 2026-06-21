@@ -71,11 +71,20 @@ func (p *PermissionService) RemoveRole(userID uint, role string) error {
 
 // RegisterPermissions registers permission definitions for a business module.
 // This is idempotent — existing definitions are not duplicated.
-func (p *PermissionService) RegisterPermissions(module string, resources []ResourceDef) error {
-	return p.c.doJSON(http.MethodPost, "/api/permissions/registry", map[string]any{
+//
+// Optional grants declare default role→permission policies (e.g. role "user"
+// may "create" on resource "comment"). The platform seeds them idempotently as
+// {module}.{resource} Casbin policies, so a fresh deploy needs no manual
+// permission assignment. Admins are superusers and need not be listed.
+func (p *PermissionService) RegisterPermissions(module string, resources []ResourceDef, grants ...RoleGrant) error {
+	body := map[string]any{
 		"module":    module,
 		"resources": resources,
-	}, nil, false)
+	}
+	if len(grants) > 0 {
+		body["grants"] = grants
+	}
+	return p.c.doJSON(http.MethodPost, "/api/permissions/registry", body, nil, false)
 }
 
 // CheckPermission checks if a user has a specific permission.

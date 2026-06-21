@@ -163,6 +163,17 @@ type ResourceDef struct {
 	Description string   `json:"description,omitempty"`
 }
 
+// RoleGrant declares a default permission a role should hold for a module's
+// resource. Sent alongside ResourceDefs at registration so the platform can
+// idempotently seed the corresponding Casbin policy (namespaced as
+// {module}.{resource}). Lets a business module own its authorization defaults
+// without a human assigning them after every fresh deploy.
+type RoleGrant struct {
+	Role     string `json:"role"`
+	Resource string `json:"resource"`
+	Action   string `json:"action"`
+}
+
 type PermissionDef struct {
 	ID          uint   `json:"id"`
 	Module      string `json:"module"`
