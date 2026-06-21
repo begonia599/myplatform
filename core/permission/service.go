@@ -51,8 +51,23 @@ func UserSubject(userID uint) string {
 }
 
 // CheckPermission checks whether a user has the given permission.
+//
+// Users with the "admin" role are treated as superusers and are always
+// allowed. This keeps the platform/business separation clean: a business
+// module only needs to register its permission definitions — it does not
+// have to seed per-role Casbin policies (with the correct {module}.{resource}
+// namespace) just so an admin can manage its resources. Non-admin roles
+// still go through normal Casbin enforcement.
 func (s *PermissionService) CheckPermission(userID uint, obj, act string) (bool, error) {
-	return s.enforcer.Enforce(UserSubject(userID), obj, act)
+	sub := UserSubject(userID)
+	if roles, err := s.enforcer.GetRolesForUser(sub); err == nil {
+		for _, r := range roles {
+			if r == "admin" {
+				return true, nil
+			}
+		}
+	}
+	return s.enforcer.Enforce(sub, obj, act)
 }
 
 // --- Policy CRUD (role → permission) ---
