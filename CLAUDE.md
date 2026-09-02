@@ -63,7 +63,8 @@ Each core module follows: `config.go` → `models.go` → `service.go` → `hand
 ### Route Structure
 
 - `/auth/*` — public (register, login, refresh, verify) + authenticated (logout, me, profile)
-- `/api/permissions/*` — admin-only (policy CRUD, role assignment)
+- `/api/permissions/*` — admin (policy CRUD, role assignment, default policies); `GET registry*` for any authenticated user; `POST registry` / `POST check` are service-to-service (guarded by `X-Service-Token` when `permission.service_token` is set; nginx blocks them publicly)
+- `/auth/oauth/:provider` — `redirect_uri` must match `auth.oauth.allowed_redirect_hosts`, otherwise 400 (503 if the allowlist is empty)
 - `/api/storage/*` — authenticated (upload, list, download, delete)
 - `/health` — unauthenticated health check
 
