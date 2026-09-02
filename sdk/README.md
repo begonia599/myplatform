@@ -85,12 +85,15 @@ func main() {
 
 ```go
 client := sdk.New(&sdk.Config{
-    BaseURL:    "http://localhost:8080",  // 必填：核心平台地址，末尾不要带 /
-    HTTPClient: customHTTPClient,         // 可选：自定义 http.Client（默认 30s 超时）
+    BaseURL:      "http://localhost:8080",  // 必填：核心平台地址，末尾不要带 /
+    HTTPClient:   customHTTPClient,         // 可选：自定义 http.Client（默认 30s 超时）
+    ServiceToken: os.Getenv("PLATFORM_SERVICE_TOKEN"), // 可选：服务间接口的 X-Service-Token
 })
 ```
 
 > `BaseURL` 与各接口路径是直接字符串拼接，末尾多一个 `/` 会请求到 `//auth/login`。
+
+> `ServiceToken` 会作为 `X-Service-Token` 头附加到每个请求上。平台配置了 `permission.service_token` 时，`RegisterPermissions` 和 `CheckPermission` 必须带上它，否则 `401`；平台未配置时留空即可。
 
 ### 自动 Token 刷新
 
@@ -155,7 +158,7 @@ base := client.GetBaseURL()
 
 | 标注 | 含义 | 说明 |
 |------|------|------|
-| ✗ | 无需认证 | 服务间调用或登录前流程，Client 无需处于登录态 |
+| ✗ | 无需认证 | 服务间调用或登录前流程，Client 无需处于登录态。其中 `RegisterPermissions` / `CheckPermission` 在平台配置了 `permission.service_token` 时要求 `X-Service-Token`，由 `Config.ServiceToken` 自动附加 |
 | ✓ | 需登录 | 携带有效 Access Token 即可 |
 | ✓ Admin | 需 `admin` 角色 | root 用户自动放行 |
 | ✓ 权限 | 需登录 + 具体 Casbin 权限 | admin / root 自动放行 |
@@ -211,7 +214,7 @@ func (a *AuthService) Login(username, password string) (*TokenPair, error)
 
 验证凭据并返回 Token 对。**登录成功后 Token 自动存储到 Client 中**，后续认证请求无需手动传 Token。凭据错误返回 `401`。
 
-> 特例：若 `username` 是平台 root 账号且 root 尚未设置密码（首次部署的默认状态），平台不校验密码，而是返回 `200 {"require_otp": true}`，响应中不含 Token。此时 SDK **不会返回 error**，但 `tokens.AccessToken` 为空字符串，后续认证请求会收到本地的 `401 not authenticated, call Login first`。业务服务不应通过 SDK 登录 root；如需防御，可在 `err == nil` 后检查 `tokens.AccessToken != ""`。
+> 特例：若 `username` 是平台 root 账号且 root 尚未设置密码（首次部署的默认状态），平台不校验密码，而是返回 `200 {"require_otp": true}`，响应中不含 Token。SDK 会把这种情况报成 `*APIError{401, "login did not return tokens (root account requires OTP setup)"}`，不会把空 Token 写入 Client。业务服务不应通过 SDK 登录 root。
 
 ```go
 tokens, err := client.Auth.Login("bob", "my-password")
@@ -449,9 +452,9 @@ func (a *AuthService) OAuthAuthorize(provider, redirectURI string) (*OAuthAuthor
 
 返回第三方授权页地址。用户授权完成后，平台会 302 回跳到 `redirectURI?exchange_code=...`；失败时为 `redirectURI?error=oauth_failed`（见上方流程说明）。
 
-> `redirectURI` 会原样拼进查询串，SDK 不做 URL 编码。若它自身带有查询参数，请先 `url.QueryEscape`。
+> `redirectURI` 的 host（或 host:port）必须在平台 `auth.oauth.allowed_redirect_hosts` 白名单内，否则返回 `400 redirect_uri not allowed`；平台未配置白名单时返回 `503`。这是防止攻击者把回跳地址指到自己服务器、截获 `exchange_code` 的唯一屏障。SDK 会对 `redirectURI` 做 URL 编码，可直接传带查询参数的地址。
 
-可能的错误：`400` 不支持的 provider 或缺少 `redirect_uri`，`404` 平台未配置 OAuth。
+可能的错误：`400` 不支持的 provider、缺少 `redirect_uri` 或 `redirect_uri` 不在白名单，`404` 平台未配置 OAuth，`503` 白名单未配置。
 
 ```go
 resp, err := client.Auth.OAuthAuthorize("github", "https://app.example.com/oauth/callback")
@@ -494,7 +497,7 @@ func (a *AuthService) OAuthBindAuthorize(provider, redirectURI string, extraScop
 
 ✓ `GET /auth/oauth/{provider}/bind?redirect_uri={redirectURI}&scopes={extraScopes}`
 
-回调时把第三方账号绑定到**当前登录用户**，不创建新用户，也不签发 Token。
+回调时把第三方账号绑定到**当前登录用户**，不创建新用户，也不签发 Token。`redirectURI` 同样受白名单约束。
 
 `extraScopes` 可申请超出登录默认值的额外 scope，多个值以空格连接后 URL 编码。例如 Discord 服务器成员校验需要：
 
@@ -874,7 +877,7 @@ err := client.Storage.Delete(42)
 
 图床服务。与 Storage 的区别是有公开 / 私有可见性控制，图片可通过固定 URL 直接访问。multipart 表单字段名为 `image`。
 
-> ⚠️ **权限要求**：图床的四个读写接口除了登录，还分别要求 `imagebed` 资源的 `upload` / `read` / `delete` / `update` 权限（✓ 权限）。平台内置的默认策略**没有**给任何角色授予这些权限，只有 admin / root 自动放行。普通用户使用前需要管理员通过 `Permission.AddPolicy("user", "imagebed", "upload")` 等逐项授予，或写入默认角色策略。Casbin 权限不足返回 `403`（`insufficient permissions`）；此外 `Delete` 和 `ToggleVisibility` 只能操作本人上传的图片，非本人且角色不是 admin 时同样返回 `403`。
+> ⚠️ **权限要求**：图床的四个读写接口除了登录，还分别要求 `imagebed` 资源的 `upload` / `read` / `delete` / `update` 权限（✓ 权限）。开启 `permission.seed_defaults` 时，平台会给内置的 admin / user / editor 三个角色播种这四项；自定义角色需要管理员通过 `Permission.AddPolicy(role, "imagebed", "upload")` 等授予。Casbin 权限不足返回 `403`（`insufficient permissions`）；此外 `Delete` 和 `ToggleVisibility` 只能操作本人上传的图片，非本人且角色不是 admin 时同样返回 `403`。
 
 #### Upload — 从本地路径上传图片
 
@@ -1021,7 +1024,7 @@ RBAC 权限管理。不同方法的鉴权要求不同：模块注册与校验是
 func (p *PermissionService) RegisterPermissions(module string, resources []ResourceDef, grants ...RoleGrant) error
 ```
 
-✗ `POST /api/permissions/registry`
+✗ `POST /api/permissions/registry`（平台配置了 `permission.service_token` 时需 `X-Service-Token`，见 `Config.ServiceToken`）
 
 推荐每个业务模块在启动时调用，**幂等**，重复注册不会产生重复定义。
 
@@ -1039,7 +1042,7 @@ err := client.Permission.RegisterPermissions("blog",
 )
 ```
 
-> 平台在注册时还会为 `admin` 和 `user` 角色写入一份**不带模块前缀**的 `{resource}` / `{action}` 策略（历史行为）。业务模块应统一按 `{module}.{resource}` 校验，并通过 `grants` 声明非 admin 角色的默认权限。
+> 注册本身不授予任何权限：admin 是超级用户无需策略，其他角色只拿到 `grants` 里声明的。`grants` 只能写 `{module}.` 前缀下的对象，无法触及平台自身（`storage`、`imagebed`）或其他模块的对象。
 
 <details>
 <summary>ResourceDef / RoleGrant 结构</summary>
@@ -1067,7 +1070,7 @@ type RoleGrant struct {
 func (p *PermissionService) CheckPermission(userID uint, object, action string) (bool, error)
 ```
 
-✗ `POST /api/permissions/check`
+✗ `POST /api/permissions/check`（平台配置了 `permission.service_token` 时需 `X-Service-Token`）
 
 业务鉴权中间件的标准入口。判定顺序：
 
@@ -1309,13 +1312,14 @@ type APIError struct {
 
 | 状态码 | 典型含义 |
 |--------|----------|
-| `400` | 参数缺失或不合法、不支持的 provider、不支持的图片类型、解绑未绑定的 OAuth 账号 |
-| `401` | 未携带 Token、Token 无效或过期、凭据错误 |
+| `400` | 参数缺失或不合法、不支持的 provider、`redirect_uri` 不在白名单、不支持的图片类型、解绑未绑定的 OAuth 账号 |
+| `401` | 未携带 Token、Token 无效或过期、凭据错误、服务间接口缺少或错误的 `X-Service-Token` |
 | `403` | 角色或权限不足、用户被禁用、平台已关闭注册 |
 | `404` | 资源或用户不存在、OAuth 未配置 |
 | `409` | 用户名已存在、账号已被合并 |
 | `410` | 第三方 Token 未存储，需重新授权 |
 | `413` | 文件超过大小限制 |
+| `503` | 平台未配置 OAuth 回跳白名单 |
 
 > `Auth.Verify()` 对空 / 无效 Token 返回的是 `*APIError`（`400` / `401` / `403`），而不是 `Valid == false` 的响应，见该方法说明。
 
@@ -1330,6 +1334,7 @@ package main
 
 import (
     "log"
+    "os"
 
     "github.com/begonia599/myplatform/sdk"
     "github.com/gin-gonic/gin"
@@ -1340,7 +1345,8 @@ var platform *sdk.Client
 
 func main() {
     platform = sdk.New(&sdk.Config{
-        BaseURL: "http://localhost:8080",
+        BaseURL:      "http://localhost:8080",
+        ServiceToken: os.Getenv("PLATFORM_SERVICE_TOKEN"), // 与平台 permission.service_token 一致
     })
 
     // 启动时注册本模块的权限与默认授权（幂等）
@@ -1501,8 +1507,8 @@ func handleOAuthExchange(c *gin.Context) {
 
 | 方法 | 路径 | 认证 | SDK 方法 |
 |------|------|------|----------|
-| POST | `/api/permissions/registry` | ✗ | `Permission.RegisterPermissions()` |
-| POST | `/api/permissions/check` | ✗ | `Permission.CheckPermission()` |
+| POST | `/api/permissions/registry` | ✗（可配置 `X-Service-Token`） | `Permission.RegisterPermissions()` |
+| POST | `/api/permissions/check` | ✗（可配置 `X-Service-Token`） | `Permission.CheckPermission()` |
 | GET | `/api/permissions/registry` | ✓ | `Permission.ListModules()` |
 | GET | `/api/permissions/registry/:module` | ✓ | `Permission.ListModulePermissions()` |
 | GET | `/api/permissions/policies` | ✓ Admin | `Permission.ListPolicies()` |

@@ -30,6 +30,11 @@ func (a *AuthService) Register(username, password, role string) (*RegisterRespon
 }
 
 // Login authenticates and stores the token pair in the client.
+//
+// The platform answers 200 without any tokens for exactly one case: the root
+// account before its password has been set (bootstrap; the response carries
+// require_otp instead). That is not a usable login, so it is surfaced as an
+// error rather than silently storing empty tokens.
 func (a *AuthService) Login(username, password string) (*TokenPair, error) {
 	var tokens TokenPair
 	err := a.c.doJSON(http.MethodPost, "/auth/login", map[string]string{
@@ -38,6 +43,9 @@ func (a *AuthService) Login(username, password string) (*TokenPair, error) {
 	}, &tokens, false)
 	if err != nil {
 		return nil, err
+	}
+	if tokens.AccessToken == "" {
+		return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "login did not return tokens (root account requires OTP setup)"}
 	}
 
 	a.c.SetTokens(tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresIn)
@@ -132,9 +140,11 @@ func (a *AuthService) UpdateProfile(update *ProfileUpdate) (*UserProfile, error)
 }
 
 // OAuthAuthorize returns the OAuth authorization URL for the given provider.
-// redirectURI is the business frontend URL to redirect back to after auth.
+// redirectURI is the business frontend URL to redirect back to after auth. Its
+// host must be in the platform's auth.oauth.allowed_redirect_hosts, otherwise
+// the platform answers 400 "redirect_uri not allowed".
 func (a *AuthService) OAuthAuthorize(provider, redirectURI string) (*OAuthAuthorizeResponse, error) {
-	path := fmt.Sprintf("/auth/oauth/%s?redirect_uri=%s", provider, redirectURI)
+	path := fmt.Sprintf("/auth/oauth/%s?redirect_uri=%s", url.PathEscape(provider), url.QueryEscape(redirectURI))
 	var resp OAuthAuthorizeResponse
 	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, false); err != nil {
 		return nil, err
@@ -150,6 +160,9 @@ func (a *AuthService) OAuthExchange(exchangeCode string) (*TokenPair, error) {
 	}, &tokens, false)
 	if err != nil {
 		return nil, err
+	}
+	if tokens.AccessToken == "" {
+		return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: "exchange did not return tokens"}
 	}
 	a.c.SetTokens(tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresIn)
 	return &tokens, nil
@@ -184,7 +197,7 @@ func (a *AuthService) GetOAuthAccounts() (*OAuthAccountsResponse, error) {
 //   - 401 token refresh failed (user revoked the app on provider side)
 func (a *AuthService) GetOAuthToken(provider string) (*OAuthTokenResponse, error) {
 	var resp OAuthTokenResponse
-	path := fmt.Sprintf("/auth/oauth/accounts/%s/token", provider)
+	path := fmt.Sprintf("/auth/oauth/accounts/%s/token", url.PathEscape(provider))
 	if err := a.c.doJSON(http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, err
 	}
@@ -193,7 +206,7 @@ func (a *AuthService) GetOAuthToken(provider string) (*OAuthTokenResponse, error
 
 // UnlinkOAuth removes an OAuth account link for the given provider.
 func (a *AuthService) UnlinkOAuth(provider string) error {
-	return a.c.doJSON(http.MethodDelete, "/auth/oauth/accounts/"+provider, nil, nil, true)
+	return a.c.doJSON(http.MethodDelete, "/auth/oauth/accounts/"+url.PathEscape(provider), nil, nil, true)
 }
 
 // OAuthBindAuthorize returns the OAuth authorization URL in bind mode.
@@ -206,7 +219,7 @@ func (a *AuthService) UnlinkOAuth(provider string) error {
 //
 // On the redirect_uri, look for ?bind_result=success|already_bound|conflict|oauth_failed|internal_error.
 func (a *AuthService) OAuthBindAuthorize(provider, redirectURI string, extraScopes ...string) (*OAuthAuthorizeResponse, error) {
-	path := fmt.Sprintf("/auth/oauth/%s/bind?redirect_uri=%s", provider, redirectURI)
+	path := fmt.Sprintf("/auth/oauth/%s/bind?redirect_uri=%s", url.PathEscape(provider), url.QueryEscape(redirectURI))
 	if len(extraScopes) > 0 {
 		scopes := strings.Join(extraScopes, " ")
 		path += "&scopes=" + url.QueryEscape(scopes)

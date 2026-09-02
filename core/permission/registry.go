@@ -37,7 +37,14 @@ type RoleGrant struct {
 
 // RegisterPermissions idempotently registers permission definitions for a module.
 // Existing entries are not duplicated; new ones are inserted.
-// Automatically creates Casbin policies for admin and user roles.
+//
+// Registration itself grants nothing. Admins are superusers (see
+// CheckPermission) and need no policies; every other role only receives what
+// the module declares in grants. This used to auto-seed "{resource}/{action}"
+// policies for admin AND user for every registered action — which meant any
+// caller of the (service-to-service) registry endpoint could hand the user
+// role arbitrary platform permissions such as storage/delete just by naming
+// the resource. That behaviour was removed.
 //
 // grants optionally declare default role→permission policies for this module,
 // seeded with a {module}.{resource} object (matching how business modules
@@ -62,23 +69,25 @@ func (s *PermissionService) RegisterPermissions(db *gorm.DB, module string, defs
 			if result.RowsAffected > 0 {
 				created++
 			}
-
-			// Auto-seed Casbin policies: admin and user get all permissions by default
-			s.enforcer.AddPolicy("admin", def.Resource, action)
-			s.enforcer.AddPolicy("user", def.Resource, action)
 		}
 	}
 
-	// Seed declared default role grants using the namespaced object so they
-	// match how business modules check (e.g. "blog.comment"). Idempotent —
-	// AddPolicy is a no-op if the rule already exists.
+	s.seedGrants(module, grants)
+	return created, nil
+}
+
+// seedGrants writes the declared default role grants using the namespaced
+// object so they match how business modules check (e.g. "blog.comment").
+// Idempotent — AddPolicy is a no-op if the rule already exists. Grants can
+// only ever touch objects under "{module}." so a module cannot reach into the
+// platform's own objects (storage, imagebed, …) or another module's.
+func (s *PermissionService) seedGrants(module string, grants []RoleGrant) {
 	for _, g := range grants {
 		if g.Role == "" || g.Resource == "" || g.Action == "" {
 			continue
 		}
 		s.enforcer.AddPolicy(g.Role, module+"."+g.Resource, g.Action)
 	}
-	return created, nil
 }
 
 // ListRegisteredModules returns a deduplicated list of all registered module names.

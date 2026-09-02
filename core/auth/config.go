@@ -13,6 +13,16 @@ type AuthConfig struct {
 type OAuthConfig struct {
 	GitHub  GitHubOAuthConfig  `yaml:"github"`
 	Discord DiscordOAuthConfig `yaml:"discord"`
+
+	// AllowedRedirectHosts lists the hosts (optionally host:port) that a
+	// business frontend may pass as redirect_uri. After the provider callback
+	// the platform 302s the browser to redirect_uri carrying a one-time
+	// exchange_code (login) or bind_result (bind); without this allowlist
+	// anyone could start a flow with redirect_uri pointing at their own server
+	// and harvest exchange codes — and therefore tokens — from users who
+	// complete the provider login. Matching is case-insensitive and exact
+	// (no wildcards). When empty, OAuth authorize requests are rejected.
+	AllowedRedirectHosts []string `yaml:"allowed_redirect_hosts"`
 }
 
 type DiscordOAuthConfig struct {

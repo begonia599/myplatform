@@ -35,7 +35,10 @@ func RegisterRoutes(router *gin.Engine, authService *auth.AuthService, permServi
 	g.GET("/registry", h.HandleListModules)
 	g.GET("/registry/:module", h.HandleListModulePermissions)
 
-	// --- Service-to-service: no auth required (used by business modules at startup) ---
-	router.POST("/api/permissions/registry", h.HandleRegisterPermissions)
-	router.POST("/api/permissions/check", h.HandleCheckPermission)
+	// --- Service-to-service (business modules, not end users). Guarded by a
+	// shared X-Service-Token when permission.service_token is configured;
+	// keep these paths off the public reverse proxy regardless. ---
+	svc := router.Group("", RequireServiceToken(permService.cfg.ServiceToken))
+	svc.POST("/api/permissions/registry", h.HandleRegisterPermissions)
+	svc.POST("/api/permissions/check", h.HandleCheckPermission)
 }

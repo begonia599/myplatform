@@ -27,11 +27,7 @@ func (h *Handler) HandleOAuthAuthorize(c *gin.Context) {
 
 	authURL, err := h.oauthService.Authorize(provider, redirectURI)
 	if err != nil {
-		if err == ErrUnsupportedProvider {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported provider"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate auth url"})
+		writeAuthorizeError(c, err, "failed to generate auth url")
 		return
 	}
 
@@ -73,15 +69,25 @@ func (h *Handler) HandleOAuthBindAuthorize(c *gin.Context) {
 
 	authURL, err := h.oauthService.AuthorizeBind(provider, redirectURI, cu.ID, extraScopes)
 	if err != nil {
-		if err == ErrUnsupportedProvider {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported provider"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate bind url"})
+		writeAuthorizeError(c, err, "failed to generate bind url")
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"auth_url": authURL})
+}
+
+// writeAuthorizeError maps authorize()/AuthorizeBind() errors to HTTP responses.
+func writeAuthorizeError(c *gin.Context, err error, fallback string) {
+	switch {
+	case errors.Is(err, ErrUnsupportedProvider):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported provider"})
+	case errors.Is(err, ErrRedirectNotAllowed):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_uri not allowed"})
+	case errors.Is(err, ErrRedirectAllowlistEmpty):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "oauth redirect allowlist not configured"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fallback})
+	}
 }
 
 // HandleLinkExisting merges the currently authenticated (OAuth-only) user

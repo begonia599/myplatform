@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 
 	"github.com/begonia599/myplatform/core/auth"
 	"github.com/begonia599/myplatform/core/database"
@@ -90,10 +91,28 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MYPLATFORM_AUTH_OAUTH_DISCORD_REDIRECT_URL"); v != "" {
 		cfg.Auth.OAuth.Discord.RedirectURL = v
 	}
+	// Comma-separated list, e.g. "blog.example.com,localhost:5173".
+	if v := os.Getenv("MYPLATFORM_AUTH_OAUTH_ALLOWED_REDIRECT_HOSTS"); v != "" {
+		cfg.Auth.OAuth.AllowedRedirectHosts = splitCSV(v)
+	}
+	if v := os.Getenv("MYPLATFORM_PERMISSION_SERVICE_TOKEN"); v != "" {
+		cfg.Permission.ServiceToken = v
+	}
 	if v := os.Getenv("MYPLATFORM_DB_HOST"); v != "" {
 		cfg.Database.Host = v
 	}
 	if v := os.Getenv("MYPLATFORM_DB_PASSWORD"); v != "" {
 		cfg.Database.Password = v
 	}
+}
+
+// splitCSV splits a comma-separated string, trimming whitespace and dropping empties.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

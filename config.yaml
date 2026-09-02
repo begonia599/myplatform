@@ -24,9 +24,22 @@ auth:
       client_id: ""
       client_secret: ""
       redirect_url: "http://localhost:8080/auth/oauth/discord/callback"
+    # Hosts a business frontend may pass as redirect_uri. After the provider
+    # callback the platform 302s the browser here with a one-time exchange_code
+    # (login) or bind_result (bind), so this MUST be an allowlist. Exact,
+    # case-insensitive host or host:port match. Empty list = OAuth disabled.
+    # Override with MYPLATFORM_AUTH_OAUTH_ALLOWED_REDIRECT_HOSTS (comma-separated).
+    allowed_redirect_hosts:
+      - blog.bgnhub.me
+      - localhost
 
 permission:
   seed_defaults: true
+  # Shared secret business modules must send as X-Service-Token on
+  # POST /api/permissions/registry and POST /api/permissions/check.
+  # Empty = no check (a warning is logged); keep those paths off the public
+  # reverse proxy regardless. Set via MYPLATFORM_PERMISSION_SERVICE_TOKEN.
+  service_token: ""
 
 storage:
   type: local

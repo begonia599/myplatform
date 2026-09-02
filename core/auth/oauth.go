@@ -24,7 +24,46 @@ var (
 	ErrProviderNotLinked   = errors.New("provider not linked for user")
 	ErrNoStoredToken       = errors.New("no stored access token; re-authorization required")
 	ErrTokenRefresh        = errors.New("oauth token refresh failed")
+
+	// ErrRedirectNotAllowed is returned when redirect_uri is malformed, uses a
+	// non-http(s) scheme, carries userinfo, or its host is not in
+	// AuthConfig.OAuth.AllowedRedirectHosts.
+	ErrRedirectNotAllowed = errors.New("redirect_uri not allowed")
+	// ErrRedirectAllowlistEmpty is returned when no allowlist is configured at
+	// all; OAuth is deliberately fail-closed in that state.
+	ErrRedirectAllowlistEmpty = errors.New("oauth allowed_redirect_hosts is not configured")
 )
+
+// validateRedirectURI enforces the redirect_uri allowlist. See
+// OAuthConfig.AllowedRedirectHosts for why this exists.
+func (s *OAuthService) validateRedirectURI(raw string) error {
+	if len(s.cfg.OAuth.AllowedRedirectHosts) == 0 {
+		return ErrRedirectAllowlistEmpty
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ErrRedirectNotAllowed
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ErrRedirectNotAllowed
+	}
+	// Reject "https://trusted.host@evil.host/…" style URLs outright.
+	if u.User != nil || u.Host == "" {
+		return ErrRedirectNotAllowed
+	}
+	host := strings.ToLower(u.Host)           // host or host:port as written
+	hostname := strings.ToLower(u.Hostname()) // host without port
+	for _, allowed := range s.cfg.OAuth.AllowedRedirectHosts {
+		a := strings.ToLower(strings.TrimSpace(allowed))
+		if a == "" {
+			continue
+		}
+		if a == host || a == hostname {
+			return nil
+		}
+	}
+	return ErrRedirectNotAllowed
+}
 
 // tokenExpiryPtr returns a pointer to the token's expiry time, or nil when
 // the provider did not specify one (e.g. classic GitHub PATs never expire).
@@ -129,6 +168,9 @@ func (s *OAuthService) AuthorizeBind(provider, redirectURI string, bindUserID ui
 }
 
 func (s *OAuthService) authorize(provider, redirectURI string, mode oauthMode, bindUserID uint, extra ...[]string) (string, error) {
+	if err := s.validateRedirectURI(redirectURI); err != nil {
+		return "", err
+	}
 	var extraScopes []string
 	if len(extra) > 0 {
 		extraScopes = extra[0]

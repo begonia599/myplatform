@@ -14,12 +14,22 @@ import (
 type Config struct {
 	BaseURL    string
 	HTTPClient *http.Client
+
+	// ServiceToken is sent as X-Service-Token on every request. The platform
+	// requires it on the service-to-service endpoints (RegisterPermissions,
+	// CheckPermission) when permission.service_token is configured server-side.
+	// Leave empty if the platform has no token configured.
+	ServiceToken string
 }
+
+// ServiceTokenHeader is the header carrying Config.ServiceToken.
+const ServiceTokenHeader = "X-Service-Token"
 
 // Client is the top-level SDK entry point.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL      string
+	httpClient   *http.Client
+	serviceToken string
 
 	mu           sync.RWMutex
 	accessToken  string
@@ -40,8 +50,9 @@ func New(cfg *Config) *Client {
 	}
 
 	c := &Client{
-		baseURL:    cfg.BaseURL,
-		httpClient: hc,
+		baseURL:      cfg.BaseURL,
+		httpClient:   hc,
+		serviceToken: cfg.ServiceToken,
 	}
 	c.Auth = &AuthService{c: c}
 	c.Storage = &StorageService{c: c}
@@ -55,10 +66,11 @@ func New(cfg *Config) *Client {
 // The returned client shares the HTTP client and base URL, but does NOT auto-refresh.
 func (c *Client) WithToken(accessToken string) *Client {
 	scoped := &Client{
-		baseURL:     c.baseURL,
-		httpClient:  c.httpClient,
-		accessToken: accessToken,
-		expiresAt:   time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), // never auto-refresh
+		baseURL:      c.baseURL,
+		httpClient:   c.httpClient,
+		serviceToken: c.serviceToken,
+		accessToken:  accessToken,
+		expiresAt:    time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), // never auto-refresh
 	}
 	scoped.Auth = &AuthService{c: scoped}
 	scoped.Storage = &StorageService{c: scoped}
@@ -123,6 +135,7 @@ func (c *Client) doJSON(method, path string, body, result any, auth bool) error 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	c.setServiceToken(req)
 	if auth {
 		c.mu.RLock()
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
@@ -159,6 +172,7 @@ func (c *Client) doRaw(method, path string, auth bool) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sdk: create request: %w", err)
 	}
+	c.setServiceToken(req)
 	if auth {
 		c.mu.RLock()
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
@@ -174,6 +188,13 @@ func (c *Client) doRaw(method, path string, auth bool) (*http.Response, error) {
 		return nil, parseErrorResponse(resp)
 	}
 	return resp, nil
+}
+
+// setServiceToken attaches X-Service-Token when one is configured.
+func (c *Client) setServiceToken(req *http.Request) {
+	if c.serviceToken != "" {
+		req.Header.Set(ServiceTokenHeader, c.serviceToken)
+	}
 }
 
 func (c *Client) ensureToken() error {
