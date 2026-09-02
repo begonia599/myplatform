@@ -53,12 +53,18 @@ func main() {
 		if cfg.Auth.OAuth.Discord.ClientID != "" {
 			log.Println("Discord OAuth enabled")
 		}
+		if len(cfg.Auth.OAuth.AllowedRedirectHosts) == 0 {
+			log.Println("WARNING: auth.oauth.allowed_redirect_hosts is empty; OAuth authorize requests will be rejected (503) until it is configured")
+		}
 	}
 
 	permService, err := permission.New(&cfg.Permission, db)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Permission init failed: %v\n", err)
 		os.Exit(1)
+	}
+	if cfg.Permission.ServiceToken == "" {
+		log.Println("WARNING: permission.service_token is empty; POST /api/permissions/registry and /check accept unauthenticated calls — keep them off the public reverse proxy")
 	}
 
 	// Sync existing users' roles into Casbin
