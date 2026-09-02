@@ -178,6 +178,20 @@ func (s *PermissionService) seedDefaults(db *gorm.DB) {
 		{"user", "storage", "read"},
 		{"editor", "storage", "upload"},
 		{"editor", "storage", "read"},
+		// imagebed permissions — routes are gated by RequirePermission on
+		// these; delete/update are additionally owner-or-admin in the service.
+		{"admin", "imagebed", "upload"},
+		{"admin", "imagebed", "read"},
+		{"admin", "imagebed", "delete"},
+		{"admin", "imagebed", "update"},
+		{"user", "imagebed", "upload"},
+		{"user", "imagebed", "read"},
+		{"user", "imagebed", "delete"},
+		{"user", "imagebed", "update"},
+		{"editor", "imagebed", "upload"},
+		{"editor", "imagebed", "read"},
+		{"editor", "imagebed", "delete"},
+		{"editor", "imagebed", "update"},
 	}
 
 	for _, p := range defaults {
