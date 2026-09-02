@@ -3,6 +3,7 @@ package sdk
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // PermissionService wraps all /api/permissions endpoints.
@@ -14,7 +15,7 @@ type PermissionService struct {
 func (p *PermissionService) ListPolicies(role string) ([]Policy, error) {
 	path := "/api/permissions/policies"
 	if role != "" {
-		path += "?role=" + role
+		path += "?role=" + url.QueryEscape(role)
 	}
 	var resp PolicyListResponse
 	if err := p.c.doJSON(http.MethodGet, path, nil, &resp, true); err != nil {
@@ -76,6 +77,9 @@ func (p *PermissionService) RemoveRole(userID uint, role string) error {
 // may "create" on resource "comment"). The platform seeds them idempotently as
 // {module}.{resource} Casbin policies, so a fresh deploy needs no manual
 // permission assignment. Admins are superusers and need not be listed.
+// Registration grants nothing beyond what is listed in grants.
+//
+// Service-to-service: sends Config.ServiceToken when set.
 func (p *PermissionService) RegisterPermissions(module string, resources []ResourceDef, grants ...RoleGrant) error {
 	body := map[string]any{
 		"module":    module,
@@ -88,7 +92,7 @@ func (p *PermissionService) RegisterPermissions(module string, resources []Resou
 }
 
 // CheckPermission checks if a user has a specific permission.
-// This is a service-to-service call (no auth required).
+// This is a service-to-service call (no user auth; sends Config.ServiceToken when set).
 func (p *PermissionService) CheckPermission(userID uint, object, action string) (bool, error) {
 	var resp struct {
 		Allowed bool `json:"allowed"`
@@ -116,7 +120,7 @@ func (p *PermissionService) ListModules() ([]string, error) {
 // ListModulePermissions returns all permission definitions for a specific module.
 func (p *PermissionService) ListModulePermissions(module string) ([]PermissionDef, error) {
 	var resp ModulePermissionsResponse
-	if err := p.c.doJSON(http.MethodGet, "/api/permissions/registry/"+module, nil, &resp, true); err != nil {
+	if err := p.c.doJSON(http.MethodGet, "/api/permissions/registry/"+url.PathEscape(module), nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return resp.Permissions, nil
