@@ -26,13 +26,12 @@ server {
     # network call these (blog -> http://app:8080); they must never be
     # reachable from the public internet. GET /api/permissions/registry
     # (list modules, authenticated) stays available for the admin UI.
-    location = /api/permissions/check {
+    location ^~ /api/permissions/check {
         return 403;
     }
-    location = /api/permissions/registry {
-        if ($request_method = POST) {
-            return 403;
-        }
+
+    location ^~ /api/permissions/registry {
+        limit_except GET HEAD { return 403; }
         proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
